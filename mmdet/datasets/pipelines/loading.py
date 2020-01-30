@@ -369,7 +369,7 @@ class LoadAnnotations:
 
         if self.with_bbox:
             results = self._load_bboxes(results)
-            if results is None:
+            if results is None or len(results['gt_bboxes']) == 0:
                 return None
         if self.with_label:
             results = self._load_labels(results)
