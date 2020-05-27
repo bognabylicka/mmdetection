@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions
 # and limitations under the License.
 
-import mmcv
 import numpy as np
 import pycocotools.mask as mask_util
 
 from ..utils.misc import to_numpy
+
 
 
 def mask2result(det_bboxes,
