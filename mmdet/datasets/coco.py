@@ -35,6 +35,10 @@ class CocoDataset(CustomDataset):
                'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock',
                'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush')
 
+    def __init__(self, classes, min_size=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.min_size = min_size
+
     def load_annotations(self, ann_file):
         """Load annotation from COCO style annotation file.
 
@@ -144,6 +148,9 @@ class CocoDataset(CustomDataset):
                 continue
             if ann['area'] <= 0 or w < 1 or h < 1:
                 continue
+            if self.min_size is not None:
+                if w < self.min_size or h < self.min_size:
+                    continue
             if ann['category_id'] not in self.cat_ids:
                 continue
             bbox = [x1, y1, x1 + w, y1 + h]
