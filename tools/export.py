@@ -87,9 +87,8 @@ def export_to_onnx(model,
 
 
 def check_onnx_model(export_name):
-    model = onnx.load(export_name)
     try:
-        onnx.checker.check_model(model)
+        onnx.checker.check_model(export_name)
         print('ONNX check passed.')
     except onnx.onnx_cpp2py_export.checker.ValidationError as ex:
         print('ONNX check failed.')
