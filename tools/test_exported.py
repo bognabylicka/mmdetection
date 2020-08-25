@@ -70,7 +70,7 @@ def empty_result(num_classes=81, with_mask=False):
     return bbox_results
 
 
-class VideoDataset(object):
+class VideoDataset:
     def __init__(self, path, cfg, device='cpu'):
         self.path = path
         self.video = cv2.VideoCapture(self.path)
