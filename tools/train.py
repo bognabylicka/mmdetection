@@ -18,6 +18,8 @@ from mmdet.datasets import build_dataset
 from mmdet.models import build_detector
 from mmdet.utils import collect_env, get_root_logger
 
+from mmdet.core.nncf import check_nncf_is_enabled
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
@@ -173,6 +175,13 @@ def main():
     # log some basic info
     logger.info(f'Distributed training: {distributed}')
     logger.info(f'Config:\n{cfg.pretty_text}')
+
+    if cfg.get('nncf_config'):
+        check_nncf_is_enabled()
+        logger.info('NNCF config: {}'.format(cfg.nncf_config))
+        cfg.ENABLE_COMPRESSION = True
+    else:
+        cfg.ENABLE_COMPRESSION = False
 
     # set random seeds
     if args.seed is not None:
