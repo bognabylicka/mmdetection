@@ -1,9 +1,9 @@
-import sys
-
 import numpy as np
+import sys
 import torch
 from torch.onnx import is_in_onnx_export
 
+from mmdet.integration.nncf import no_nncf_trace
 from mmdet.utils.deployment.symbolic import py_symbolic
 from . import nms_ext
 
