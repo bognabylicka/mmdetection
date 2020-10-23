@@ -156,6 +156,13 @@ def stub_anchor_generator(model, anchor_head_name):
                 i].base_anchors.cpu().numpy()
 
 
+    onnx_model_path = onnx_model_path.replace('.onnx', '_text_recognition_head_decoder.onnx')
+    command_line = f'mo.py --input_model="{onnx_model_path}" ' \
+                   f'--output_dir="{output_dir_path}"'
+    print(command_line)
+    run(command_line, shell=True, check=True)
+
+
 def stub_roi_feature_extractor(model, extractor_name):
     if hasattr(model, extractor_name):
         extractor = getattr(model, extractor_name)
