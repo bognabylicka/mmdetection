@@ -155,9 +155,14 @@ def stub_anchor_generator(model, anchor_head_name):
             anchor_generators[i].grid_anchors.params['base_anchors'] = anchor_generators[
                 i].base_anchors.cpu().numpy()
 
+    onnx_model_path_tr_encoder = onnx_model_path.replace('.onnx', '_text_recognition_head_encoder.onnx')
+    command_line = f'mo.py --input_model="{onnx_model_path_tr_encoder}" ' \
+                   f'--output_dir="{output_dir_path}"'
+    print(command_line)
+    run(command_line, shell=True, check=True)
 
-    onnx_model_path = onnx_model_path.replace('.onnx', '_text_recognition_head_decoder.onnx')
-    command_line = f'mo.py --input_model="{onnx_model_path}" ' \
+    onnx_model_path_tr_decoder = onnx_model_path.replace('.onnx', '_text_recognition_head_decoder.onnx')
+    command_line = f'mo.py --input_model="{onnx_model_path_tr_decoder}" ' \
                    f'--output_dir="{output_dir_path}"'
     print(command_line)
     run(command_line, shell=True, check=True)
