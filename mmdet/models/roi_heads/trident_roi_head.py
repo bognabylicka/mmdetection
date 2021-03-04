@@ -48,7 +48,8 @@ class TridentRoIHead(StandardRoIHead):
                     proposal_list,
                     img_metas,
                     proposals=None,
-                    rescale=False):
+                    rescale=False,
+                    postprocess=False):
         """Test without augmentation as follows:
 
         1. Compute prediction bbox and label per branch.
