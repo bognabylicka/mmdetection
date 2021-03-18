@@ -37,9 +37,7 @@ from .yolo import YOLOV3
 from .yolof import YOLOF
 from .yolox import YOLOX
 
-# Replace custom ops
 import mmdet.ops.nms
-import mmdet.ops.roi_align
 
 
 __all__ = [
