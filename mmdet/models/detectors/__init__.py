@@ -37,7 +37,7 @@ from .yolo import YOLOV3
 from .yolof import YOLOF
 from .yolox import YOLOX
 
-import mmdet.ops.nms
+#import mmdet.ops.nms
 
 
 __all__ = [
