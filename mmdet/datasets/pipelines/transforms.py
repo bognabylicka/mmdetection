@@ -307,6 +307,10 @@ class Resize:
         self._resize_bboxes(results)
         self._resize_masks(results)
         self._resize_seg(results)
+
+        if 'copy_paste' in results:
+            self.__call__(results['copy_paste'])
+
         return results
 
     def __repr__(self):
