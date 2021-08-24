@@ -14,50 +14,66 @@
 
 import copy
 import io
-import numpy as np
 import os
 import shutil
 import tempfile
-import torch
 import warnings
 from collections import defaultdict
-from typing import List, Optional, Tuple
+from typing import List
+from typing import Optional
+from typing import Tuple
 
+import numpy as np
+import torch
 from mmcv.parallel import MMDataParallel
 from mmcv.runner import load_checkpoint
 from mmcv.utils import Config
+from ote_sdk.configuration import cfg_helper
 from ote_sdk.configuration.helper.utils import ids_to_strings
+from ote_sdk.entities.annotation import Annotation
+from ote_sdk.entities.datasets import Subset
 from ote_sdk.entities.inference_parameters import InferenceParameters
 from ote_sdk.entities.label import ScoredLabel
-from ote_sdk.entities.metrics import (CurveMetric, InfoMetric, LineChartInfo,
-                                      MetricsGroup, Performance, ScoreMetric,
-                                      VisualizationInfo, VisualizationType)
+from ote_sdk.entities.metrics import CurveMetric
+from ote_sdk.entities.metrics import InfoMetric
+from ote_sdk.entities.metrics import LineChartInfo
+from ote_sdk.entities.metrics import MetricsGroup
+from ote_sdk.entities.metrics import Performance
+from ote_sdk.entities.metrics import ScoreMetric
+from ote_sdk.entities.metrics import VisualizationInfo
+from ote_sdk.entities.metrics import VisualizationType
+from ote_sdk.entities.model import ModelStatus
+from ote_sdk.entities.resultset import ResultsetPurpose
 from ote_sdk.entities.shapes.box import Box
-from ote_sdk.entities.train_parameters import default_progress_callback, TrainParameters
-from ote_sdk.configuration import cfg_helper
-from sc_sdk.entities.annotation import Annotation
-from sc_sdk.entities.datasets import Dataset, Subset
-from sc_sdk.entities.model import Model, ModelStatus
-from sc_sdk.entities.optimized_model import ModelPrecision, OptimizedModel
-from sc_sdk.entities.resultset import ResultSet, ResultsetPurpose
 from ote_sdk.entities.task_environment import TaskEnvironment
-from sc_sdk.logging import logger_factory
+from ote_sdk.entities.train_parameters import TrainParameters
+from ote_sdk.entities.train_parameters import default_progress_callback
 from ote_sdk.usecases.evaluation.metrics_helper import MetricsHelper
 from ote_sdk.usecases.tasks.interfaces.evaluate_interface import IEvaluationTask
-from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType, IExportTask
 from ote_sdk.usecases.tasks.interfaces.inference_interface import IInferenceTask
 from ote_sdk.usecases.tasks.interfaces.training_interface import ITrainingTask
 from ote_sdk.usecases.tasks.interfaces.unload_interface import IUnload
+from sc_sdk.entities.datasets import Dataset
+from sc_sdk.entities.model import Model
+from sc_sdk.entities.optimized_model import ModelPrecision
+from sc_sdk.entities.optimized_model import OptimizedModel
+from sc_sdk.entities.resultset import ResultSet
+from sc_sdk.logging import logger_factory
+from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType
+from sc_sdk.usecases.tasks.interfaces.export_interface import IExportTask
 
-from mmdet.apis import export_model, single_gpu_test, train_detector
-from mmdet.apis.ote.apis.detection.config_utils import (patch_config,
-                                                        prepare_for_testing,
-                                                        prepare_for_training,
-                                                        set_hyperparams)
+from mmdet.apis import export_model
+from mmdet.apis import single_gpu_test
+from mmdet.apis import train_detector
+from mmdet.apis.ote.apis.detection.config_utils import patch_config
+from mmdet.apis.ote.apis.detection.config_utils import prepare_for_testing
+from mmdet.apis.ote.apis.detection.config_utils import prepare_for_training
+from mmdet.apis.ote.apis.detection.config_utils import set_hyperparams
 from mmdet.apis.ote.apis.detection.configuration import OTEDetectionConfig
 from mmdet.apis.ote.apis.detection.ote_utils import TrainingProgressCallback
 from mmdet.apis.ote.extension.utils.hooks import OTELoggerHook
-from mmdet.datasets import build_dataloader, build_dataset
+from mmdet.datasets import build_dataloader
+from mmdet.datasets import build_dataset
 from mmdet.models import build_detector
 from mmdet.parallel import MMDataCPU
 

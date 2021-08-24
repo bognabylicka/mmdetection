@@ -13,14 +13,14 @@
 # and limitations under the License.
 
 from attr import attrs
-from ote_sdk.configuration.elements import (ParameterGroup,
-                                            add_parameter_group,
-                                            boolean_attribute,
-                                            configurable_boolean,
-                                            configurable_float,
-                                            configurable_integer,
-                                            string_attribute,
-                                            ModelConfig)
+from ote_sdk.configuration.elements import ModelConfig
+from ote_sdk.configuration.elements import ParameterGroup
+from ote_sdk.configuration.elements import add_parameter_group
+from ote_sdk.configuration.elements import boolean_attribute
+from ote_sdk.configuration.elements import configurable_boolean
+from ote_sdk.configuration.elements import configurable_float
+from ote_sdk.configuration.elements import configurable_integer
+from ote_sdk.configuration.elements import string_attribute
 from ote_sdk.configuration.model_lifecycle import ModelLifecycle
 
 

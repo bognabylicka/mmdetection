@@ -18,15 +18,16 @@ import os
 import random
 import subprocess
 import tempfile
-import yaml
 from typing import Optional
 
 import numpy as np
-from ote_sdk.entities.train_parameters import UpdateProgressCallback
+import yaml
 from ote_sdk.entities.label import Color
-from sc_sdk.entities.label import Label
-from ote_sdk.entities.label_schema import LabelGroup, LabelGroupType
+from ote_sdk.entities.label_schema import LabelGroup
+from ote_sdk.entities.label_schema import LabelGroupType
+from ote_sdk.entities.train_parameters import UpdateProgressCallback
 from ote_sdk.usecases.reporting.time_monitor_callback import TimeMonitorCallback
+from sc_sdk.entities.label import Label
 from sc_sdk.entities.label_schema import LabelSchema
 
 

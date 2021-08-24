@@ -17,9 +17,11 @@ import glob
 import os
 import tempfile
 from collections import defaultdict
-from typing import List, Optional
+from typing import List
+from typing import Optional
 
-from mmcv import Config, ConfigDict
+from mmcv import Config
+from mmcv import ConfigDict
 from ote_sdk.usecases.reporting.time_monitor_callback import TimeMonitorCallback
 from sc_sdk.entities.datasets import Dataset
 from sc_sdk.entities.label import Label

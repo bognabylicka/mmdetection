@@ -15,26 +15,29 @@
 import argparse
 import os.path as osp
 import sys
+
 from ote_sdk.configuration.helper import create
 from ote_sdk.entities.inference_parameters import InferenceParameters
-from sc_sdk.entities.dataset_storage import NullDatasetStorage
-from sc_sdk.entities.datasets import Subset
-from sc_sdk.entities.model import Model, ModelStatus
-from sc_sdk.entities.model_storage import NullModelStorage
+from ote_sdk.entities.model import ModelStatus
 from ote_sdk.entities.model_template import parse_model_template
-from sc_sdk.entities.optimized_model import (ModelOptimizationType,
-                                             ModelPrecision, OptimizedModel,
-                                             TargetDevice)
+from ote_sdk.entities.subset import Subset
+from ote_sdk.entities.task_environment import TaskEnvironment
+from sc_sdk.entities.dataset_storage import NullDatasetStorage
+from sc_sdk.entities.model import Model
+from sc_sdk.entities.model_storage import NullModelStorage
+from sc_sdk.entities.optimized_model import ModelOptimizationType
+from sc_sdk.entities.optimized_model import ModelPrecision
+from sc_sdk.entities.optimized_model import OptimizedModel
+from sc_sdk.entities.optimized_model import TargetDevice
 from sc_sdk.entities.project import NullProject
 from sc_sdk.entities.resultset import ResultSet
-from ote_sdk.entities.task_environment import TaskEnvironment
 from sc_sdk.logging import logger_factory
 from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType
 
 from mmdet.apis.ote.apis.detection.config_utils import set_values_as_default
-from mmdet.apis.ote.apis.detection.ote_utils import (generate_label_schema,
-                                                     get_task_class,
-                                                     reload_hyper_parameters)
+from mmdet.apis.ote.apis.detection.ote_utils import generate_label_schema
+from mmdet.apis.ote.apis.detection.ote_utils import get_task_class
+from mmdet.apis.ote.apis.detection.ote_utils import reload_hyper_parameters
 from mmdet.apis.ote.extension.datasets.mmdataset import MMDatasetAdapter
 
 logger = logger_factory.get_logger('Sample')

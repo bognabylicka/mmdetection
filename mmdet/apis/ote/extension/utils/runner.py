@@ -17,8 +17,12 @@ import warnings
 
 import mmcv
 import torch.distributed as dist
+from mmcv.runner import RUNNERS
+from mmcv.runner import EpochBasedRunner
+from mmcv.runner import IterBasedRunner
+from mmcv.runner import IterLoader
+from mmcv.runner import get_dist_info
 from mmcv.runner.utils import get_host_info
-from mmcv.runner import RUNNERS, EpochBasedRunner, IterBasedRunner, IterLoader, get_dist_info
 
 
 @RUNNERS.register_module()

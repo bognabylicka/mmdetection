@@ -12,26 +12,31 @@
 # See the License for the specific language governing permissions
 # and limitations under the License.
 
-from typing import Any, Dict, Tuple, List, Optional, Union
+from typing import Any
+from typing import Dict
+from typing import List
+from typing import Optional
+from typing import Tuple
+from typing import Union
 
 import cv2
 import numpy as np
-
+from ote_sdk.entities.annotation import Annotation
+from ote_sdk.entities.annotation import AnnotationSceneKind
 from ote_sdk.entities.id import ID
 from ote_sdk.entities.inference_parameters import InferenceParameters
 from ote_sdk.entities.label import ScoredLabel
 from ote_sdk.entities.shapes.box import Box
-from ote_sdk.entities.annotation import Annotation, AnnotationSceneKind
+from ote_sdk.entities.task_environment import TaskEnvironment
+from ote_sdk.usecases.evaluation.metrics_helper import MetricsHelper
+from ote_sdk.usecases.tasks.interfaces.evaluate_interface import IEvaluationTask
+from ote_sdk.usecases.tasks.interfaces.inference_interface import IInferenceTask
 from sc_sdk.entities.annotation import AnnotationScene
 from sc_sdk.entities.datasets import Dataset
-from ote_sdk.usecases.evaluation.metrics_helper import MetricsHelper
-from sc_sdk.usecases.exportable_code.inference import BaseOpenVINOInferencer
 from sc_sdk.entities.label import Label
 from sc_sdk.entities.media_identifier import ImageIdentifier
 from sc_sdk.entities.resultset import ResultSet
-from ote_sdk.entities.task_environment import TaskEnvironment
-from ote_sdk.usecases.tasks.interfaces.evaluate_interface import IEvaluationTask
-from ote_sdk.usecases.tasks.interfaces.inference_interface import IInferenceTask
+from sc_sdk.usecases.exportable_code.inference import BaseOpenVINOInferencer
 
 from .configuration import OTEDetectionConfig
 

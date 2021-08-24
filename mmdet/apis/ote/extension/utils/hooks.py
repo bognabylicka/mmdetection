@@ -14,15 +14,18 @@
 
 import math
 import os
-from math import inf
 from collections import defaultdict
+from math import inf
 
-from mmcv.runner.hooks import HOOKS, Hook, LoggerHook, LrUpdaterHook
-from mmcv.runner import BaseRunner, EpochBasedRunner
+from mmcv.runner import BaseRunner
+from mmcv.runner import EpochBasedRunner
 from mmcv.runner.dist_utils import master_only
+from mmcv.runner.hooks import HOOKS
+from mmcv.runner.hooks import Hook
+from mmcv.runner.hooks import LoggerHook
+from mmcv.runner.hooks import LrUpdaterHook
 from mmcv.utils import print_log
 from sc_sdk.logging import logger_factory
-
 
 logger = logger_factory.get_logger("OTEDetectionTask.Hooks")
 

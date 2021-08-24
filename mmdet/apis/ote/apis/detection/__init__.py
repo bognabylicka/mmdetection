@@ -13,14 +13,20 @@
 # and limitations under the License.
 
 
-from .config_utils import (config_from_string, config_to_string, patch_config,
-                           prepare_for_testing, prepare_for_training,
-                           save_config_to_file, set_hyperparams,
-                           set_values_as_default)
+from .config_utils import config_from_string
+from .config_utils import config_to_string
+from .config_utils import patch_config
+from .config_utils import prepare_for_testing
+from .config_utils import prepare_for_training
+from .config_utils import save_config_to_file
+from .config_utils import set_hyperparams
+from .config_utils import set_values_as_default
 from .configuration import OTEDetectionConfig
 from .openvino_task import OpenVINODetectionTask
-from .ote_utils import (generate_label_schema, get_task_class, load_template,
-                        reload_hyper_parameters)
+from .ote_utils import generate_label_schema
+from .ote_utils import get_task_class
+from .ote_utils import load_template
+from .ote_utils import reload_hyper_parameters
 from .task import OTEDetectionTask
 
 __all__ = [
