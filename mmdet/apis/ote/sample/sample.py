@@ -13,6 +13,7 @@
 # and limitations under the License.
 
 import argparse
+import logging
 import os.path as osp
 import sys
 
@@ -31,7 +32,6 @@ from sc_sdk.entities.optimized_model import OptimizedModel
 from sc_sdk.entities.optimized_model import TargetDevice
 from sc_sdk.entities.project import NullProject
 from sc_sdk.entities.resultset import ResultSet
-from sc_sdk.logging import logger_factory
 from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType
 
 from mmdet.apis.ote.apis.detection.config_utils import set_values_as_default
@@ -40,7 +40,8 @@ from mmdet.apis.ote.apis.detection.ote_utils import get_task_class
 from mmdet.apis.ote.apis.detection.ote_utils import reload_hyper_parameters
 from mmdet.apis.ote.extension.datasets.mmdataset import MMDatasetAdapter
 
-logger = logger_factory.get_logger('Sample')
+logger = logging.getLogger(__name__)
+
 
 
 def parse_args():

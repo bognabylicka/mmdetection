@@ -14,6 +14,7 @@
 
 import copy
 import glob
+import logging
 import os
 import tempfile
 from collections import defaultdict
@@ -25,11 +26,10 @@ from mmcv import ConfigDict
 from ote_sdk.usecases.reporting.time_monitor_callback import TimeMonitorCallback
 from sc_sdk.entities.datasets import Dataset
 from sc_sdk.entities.label import Label
-from sc_sdk.logging import logger_factory
 
 from .configuration import OTEDetectionConfig
 
-logger = logger_factory.get_logger("OTEDetectionTask")
+logger = logging.getLogger(__name__)
 
 
 def patch_config(config: Config, work_dir: str, labels: List[Label], random_seed: Optional[int] = None):

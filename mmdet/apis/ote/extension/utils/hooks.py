@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions
 # and limitations under the License.
 
+import logging
 import math
 import os
 from collections import defaultdict
@@ -25,9 +26,8 @@ from mmcv.runner.hooks import Hook
 from mmcv.runner.hooks import LoggerHook
 from mmcv.runner.hooks import LrUpdaterHook
 from mmcv.utils import print_log
-from sc_sdk.logging import logger_factory
 
-logger = logger_factory.get_logger("OTEDetectionTask.Hooks")
+logger = logging.getLogger(__name__)
 
 
 @HOOKS.register_module()

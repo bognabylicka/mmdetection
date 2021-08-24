@@ -14,6 +14,7 @@
 
 import copy
 import io
+import logging
 import os
 import shutil
 import tempfile
@@ -58,7 +59,6 @@ from sc_sdk.entities.model import Model
 from sc_sdk.entities.optimized_model import ModelPrecision
 from sc_sdk.entities.optimized_model import OptimizedModel
 from sc_sdk.entities.resultset import ResultSet
-from sc_sdk.logging import logger_factory
 from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType
 from sc_sdk.usecases.tasks.interfaces.export_interface import IExportTask
 
@@ -77,7 +77,7 @@ from mmdet.datasets import build_dataset
 from mmdet.models import build_detector
 from mmdet.parallel import MMDataCPU
 
-logger = logger_factory.get_logger("OTEDetectionTask")
+logger = logging.getLogger(__name__)
 
 
 class OTEDetectionTask(ITrainingTask, IInferenceTask, IExportTask, IEvaluationTask, IUnload):
