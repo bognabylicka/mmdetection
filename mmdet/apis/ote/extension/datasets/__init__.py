@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions
 # and limitations under the License.
 
-from .mmdataset import OTEDataset
-from .mmdataset import get_annotation_mmdet_format
+from .mm_dataset import MMDataset
+from .ote_dataset import OTEDataset
+from .ote_dataset import get_annotation_mmdet_format
 
-__all__ = [OTEDataset, get_annotation_mmdet_format]
+__all__ = [MMDataset, OTEDataset, get_annotation_mmdet_format]

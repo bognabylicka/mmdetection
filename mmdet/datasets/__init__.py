@@ -1,6 +1,6 @@
 from .builder import DATASETS, PIPELINES, build_dataloader, build_dataset
 from .cityscapes import CityscapesDataset
-from .coco import CocoDataset
+from .coco import CocoDataset, ConcatenatedCocoDataset
 from .coco_with_text import CocoWithTextDataset
 from .custom import CustomDataset
 from .dataset_wrappers import (ClassBalancedDataset, ConcatDataset,
@@ -21,5 +21,5 @@ __all__ = [
     'DistributedSampler', 'build_dataloader', 'ConcatDataset', 'RepeatDataset',
     'ClassBalancedDataset', 'WIDERFaceDataset', 'DATASETS', 'PIPELINES',
     'build_dataset', 'replace_ImageToTensor', 'get_loading_pipeline',
-    'NumClassCheckHook', 'CocoWithTextDataset'
+    'NumClassCheckHook', 'CocoWithTextDataset', 'ConcatenatedCocoDataset'
 ]
