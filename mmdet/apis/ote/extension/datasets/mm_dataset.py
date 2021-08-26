@@ -283,7 +283,7 @@ class MMDatasetItem(DatasetItemEntity):
                 "such as segmentation).",
                 n_invalid_shapes,
             )
-        self.annotation_scene.append_annotations(validated_annotations)
+        self.annotation.append(validated_annotations)
 
     def append_labels(self, labels: List[ScoredLabel]):
         """
@@ -595,14 +595,22 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
         new_dataset = MMDataset(subsets=self.subsets)
         new_dataset.project_labels = self.project_labels
 
-        for dataset_item in self:
-            if isinstance(dataset_item, MMDatasetItem):
-                new_dataset_item = MMDatasetItem(
-                    image=dataset_item.image,
-                    annotation=[],
-                    subset=dataset_item.subset,
-                )
-                new_dataset.append(new_dataset_item)
+        for key in range(len(self)):
+            gt_boxes = new_dataset.coco_dataset[key]['gt_bboxes']
+            shape = list(gt_boxes.shape)
+            shape[0] = 0
+            new_dataset.coco_dataset[key]['gt_bboxes'] = np.empty(shape, dtype=gt_boxes.dtype)
+            gt_labels = new_dataset.coco_dataset[key]['gt_labels']
+            new_dataset.coco_dataset[key]['gt_labels'] = np.empty(0, dtype=gt_labels.dtype)
+
+        # for dataset_item in self:
+        #     if isinstance(dataset_item, MMDatasetItem):
+        #         new_dataset_item = MMDatasetItem(
+        #             image=dataset_item.image,
+        #             annotation=[],
+        #             subset=dataset_item.subset,
+        #         )
+        #         new_dataset.append(new_dataset_item)
         return new_dataset
 
 
