@@ -158,9 +158,10 @@ def main(args):
                 Subset.TESTING: osp.join(args.data_dir, 'coco/val2017/')
             })
 
-    labels_schema = generate_label_schema(dataset.subsets[Subset.NONE].CLASSES)
-    labels_list = labels_schema.get_labels(False)
-    dataset.set_project_labels(labels_list)
+    labels = dataset.get_labels()
+    labels_schema = generate_label_schema(labels)
+    # labels_list = labels_schema.get_labels(False)
+    # dataset.set_project_labels(labels_list)
 
     logger.info(f'Train dataset: {len(dataset.get_subset(Subset.TRAINING))} items')
     logger.info(f'Validation dataset: {len(dataset.get_subset(Subset.VALIDATION))} items')

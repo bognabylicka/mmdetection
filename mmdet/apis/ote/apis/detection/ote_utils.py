@@ -72,16 +72,28 @@ class ColorPalette:
         return len(self.palette)
 
 
-def generate_label_schema(label_names):
-    label_domain = "detection"
-    colors = ColorPalette(len(label_names)) if len(label_names) > 0 else []
-    not_empty_labels = [Label(name=name, color=colors[i], domain=label_domain, id=i) for i, name in
-                        enumerate(label_names)]
-    emptylabel = Label(name=f"Empty label", color=Color(42, 43, 46),
-                       is_empty=True, domain=label_domain, id=len(not_empty_labels))
+# def generate_label_schema(label_names):
+#     label_domain = "detection"
+#     colors = ColorPalette(len(label_names)) if len(label_names) > 0 else []
+#     not_empty_labels = [Label(name=name, color=colors[i], domain=label_domain, id=i) for i, name in
+#                         enumerate(label_names)]
+#     emptylabel = Label(name=f"Empty label", color=Color(42, 43, 46),
+#                        is_empty=True, domain=label_domain, id=len(not_empty_labels))
 
+#     label_schema = LabelSchema()
+#     exclusive_group = LabelGroup(name="labels", labels=not_empty_labels, group_type=LabelGroupType.EXCLUSIVE)
+#     empty_group = LabelGroup(name="empty", labels=[emptylabel], group_type=LabelGroupType.EMPTY_LABEL)
+#     label_schema.add_group(exclusive_group)
+#     label_schema.add_group(empty_group, exclusive_with=[exclusive_group])
+#     return label_schema
+
+
+def generate_label_schema(labels):
+    label_domain = "detection"
+    emptylabel = Label(name=f"Empty label", color=Color(42, 43, 46),
+                       is_empty=True, domain=label_domain, id=len(labels))
     label_schema = LabelSchema()
-    exclusive_group = LabelGroup(name="labels", labels=not_empty_labels, group_type=LabelGroupType.EXCLUSIVE)
+    exclusive_group = LabelGroup(name="labels", labels=labels, group_type=LabelGroupType.EXCLUSIVE)
     empty_group = LabelGroup(name="empty", labels=[emptylabel], group_type=LabelGroupType.EMPTY_LABEL)
     label_schema.add_group(exclusive_group)
     label_schema.add_group(empty_group, exclusive_with=[exclusive_group])
@@ -112,8 +124,11 @@ def reload_hyper_parameters(model_template):
     temp_folder = tempfile.mkdtemp()
     conf_yaml = [dep.source for dep in model_template.dependencies if dep.destination == model_template.hyper_parameters.base_path][0]
     conf_yaml = os.path.join(template_dir, conf_yaml)
-    subprocess.run(f'cp {conf_yaml} {temp_folder}', check=True, shell=True)
-    subprocess.run(f'cp {template_file} {temp_folder}', check=True, shell=True)
+    import shutil
+    shutil.copy(conf_yaml, temp_folder)
+    shutil.copy(template_file, temp_folder)
+    # subprocess.run(f'cp {conf_yaml} {temp_folder}', check=True, shell=True)
+    # subprocess.run(f'cp {template_file} {temp_folder}', check=True, shell=True)
     model_template.hyper_parameters.load_parameters(os.path.join(temp_folder, 'template.yaml'))
     assert model_template.hyper_parameters.data
 

@@ -48,6 +48,7 @@ from ote_sdk.entities.shapes.box import Box
 from ote_sdk.entities.subset import Subset
 from ote_sdk.utils.shape_factory import ShapeFactory
 from ote_sdk.utils.time_utils import now
+from sc_sdk.entities.label import Label
 
 from mmdet.datasets import CocoDataset
 from mmdet.datasets import ConcatDataset
@@ -108,6 +109,14 @@ class Image(IMedia2DEntity):
         self.__width = None
         self.__image_id = image_id if image_id is not None else ImageIdentifier()
 
+    def __repr__(self):
+        s = ''
+        if self.__data is not None:
+            s += 'With data'
+        else:
+            s += f'file: "{self.__file_path}"'
+        return f'Image({s}, {self.width}, {self.height}, {self.media_identifier})'
+
     def __get_size(self) -> Tuple[int, int]:
         if self.__data is not None:
             return self.__data.shape[:2]
@@ -121,6 +130,8 @@ class Image(IMedia2DEntity):
 
     @property
     def numpy(self) -> np.ndarray:
+        if self.__data is None:
+            self.__data = cv2.imread(self.__file_path)
         return self.__data
 
     def roi_numpy(self, roi: Optional[Annotation] = None) -> np.ndarray:
@@ -171,6 +182,9 @@ class MMDatasetItem(DatasetItemEntity):
         self.annotation: List[Annotation] = list(annotation)
         self.subset: Subset = subset
         self._roi = Annotation(Box.generate_full_box(), labels=[], id=ID())
+
+    def __repr__(self):
+        return f'MMDatasetItem({self.image}, {self.annotation}, {self.subset})'
 
     @property
     def roi(self) -> Annotation:
@@ -336,20 +350,24 @@ class DatasetIterator(collections.abc.Iterator):
 
 class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
 
-    def __init__(self,
-                 annotation_files: Optional[Mapping[Subset, str]] = None,
-                 data_root_dirs: Optional[Mapping[Subset, str]] = None,
-                 subsets: Optional[List[CocoDataset]] = None,
-                 creation_date: Optional[datetime.datetime] = None,
-                 id: Optional[ID] = None,
-                 purpose: Optional[DatasetPurpose] = DatasetPurpose.INFERENCE
-                 ):
+    def __init__(
+        self,
+        annotation_files: Optional[Mapping[Subset, str]] = None,
+        data_root_dirs: Optional[Mapping[Subset, str]] = None,
+        items: Optional[List[MMDatasetItem]] = None,
+        labels: Optional[List[LabelEntity]] = (),
+        creation_date: Optional[datetime.datetime] = None,
+        id: Optional[ID] = None,
+        purpose: Optional[DatasetPurpose] = DatasetPurpose.INFERENCE
+    ):
         id = id if id is not None else ID()
         creation_date = creation_date if creation_date is not None else now()
         super().__init__(id=id, creation_date=creation_date, items=None, purpose=purpose, mutable=False)
 
-        if subsets is not None:
-            self.subsets = subsets
+        self.labels = list(labels)
+
+        if items is not None:
+            self._items = items
         else:
             ann_files = {}
             for k, v in annotation_files.items():
@@ -361,35 +379,28 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
                 if v:
                     data_roots[k] = os.path.abspath(v)
 
-            self.subsets = {}
-            non_empty_subsets = []
             for subset in (Subset.TRAINING, Subset.VALIDATION, Subset.TESTING):
-                subdataset = self.__init_subset(ann_files.get(subset), data_roots.get(subset), subset)
-                self.subsets[subset] = subdataset
-                if subdataset is not None:
-                    non_empty_subsets.append(subdataset)
+                self.add_data(ann_files.get(subset), data_roots.get(subset), subset)
 
-            if len(non_empty_subsets) == 0:
-                raise ValueError('Dataset is empty.')
+    def find_label_by_name(self, name):
+        matching_labels = [label for label in self.labels if label.name == name]
+        if len(matching_labels) == 1:
+            return matching_labels[0]
+        elif len(matching_labels) == 0:
+            label = Label(name=name, domain="detection", id=len(self.labels))
+            self.labels.append(label)
+            return label
+        else:
+            raise ValueError('Found multiple matching labels')
 
-            self.subsets[Subset.NONE] = ConcatenatedCocoDataset(ConcatDataset(non_empty_subsets))
-            self.subsets[Subset.NONE].copy_paste_aug_used = False
-
-        self.coco_dataset = self.subsets[Subset.NONE]
-        self.project_labels = None
-
-    # FIXME
-    def set_project_labels(self, project_labels):
-        self.project_labels = project_labels
-
-    def label_name_to_project_label(self, label_name):
-        return [label for label in self.project_labels if label.name == label_name][0]
-
-    def __init_subset(self, ann_file, data_root, subset) -> bool:
+    def add_data(self, ann_file, data_root, subset):
         test_mode = subset in {Subset.VALIDATION, Subset.TESTING}
         if ann_file is None:
-            return None
-        pipeline = [dict(type='LoadImageFromFile'), dict(type='LoadAnnotations', with_bbox=True)]
+            return
+        pipeline = [
+            # dict(type='LoadImageFromFile'),
+            dict(type='LoadAnnotations', with_bbox=True)
+            ]
         classes = None
         with open(ann_file) as f:
             content = json.load(f)
@@ -399,10 +410,28 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
                                    data_root=data_root,
                                    classes=classes,
                                    test_mode=test_mode)
-        if hasattr(coco_dataset, 'flag'):
-            del coco_dataset.flag
         coco_dataset.test_mode = False
-        return coco_dataset
+
+        for item in coco_dataset:
+            def create_gt_box(x1, y1, x2, y2, label_name):
+                return Annotation(Box(x1=x1, y1=y1, x2=x2, y2=y2),
+                                  labels=[ScoredLabel(label=self.find_label_by_name(label_name))])
+
+            img_height = item['img_info'].get('height')
+            img_width = item['img_info'].get('width')
+            divisor = np.array([img_width, img_height, img_width, img_height], dtype=item['gt_bboxes'].dtype)
+            bboxes = item['gt_bboxes'] / divisor
+            labels = item['gt_labels']
+
+            if item['img_prefix'] is not None:
+                filename = os.path.join(item['img_prefix'], item['img_info']['filename'])
+            else:
+                filename = item['img_info']['filename']
+
+            shapes = [create_gt_box(*coords, coco_dataset.CLASSES[label_id]) for coords, label_id in zip(bboxes, labels)]
+
+            dataset_item = MMDatasetItem(Image(file_path=filename, name=filename), shapes, subset)
+            self._items.append(dataset_item)
 
     def __repr__(self):
         return f"MMDataset(\n" \
@@ -415,16 +444,10 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
             f"\tsize={len(self)})"
 
     def __len__(self) -> int:
-        assert self.coco_dataset is not None
-        return len(self.coco_dataset)
+        return len(self._items)
 
     def get_subset(self, subset: Subset) -> "MMDataset":
-        subdatasets = {
-            subset: self.subsets[subset],
-            Subset.NONE: self.subsets[subset]
-        }
-        dataset = MMDataset(subsets=subdatasets, id=self.id, creation_date=self.creation_date, purpose=self.purpose)
-        dataset.project_labels = self.project_labels
+        dataset = MMDataset(items=[x for x in self._items if x.subset == subset], purpose=self.purpose)
         return dataset
 
     # Disable methods that modify the dataset, treating it as immutable.
@@ -467,30 +490,7 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
             # Get the start, stop, and step from the slice
             return [self._fetch(ii) for ii in range(*key.indices(len(self._items)))]
         if isinstance(key, (int, np.int32, np.int64)):
-            def create_gt_scored_label(label_name):
-                return ScoredLabel(label=self.label_name_to_project_label(label_name))
-
-            def create_gt_box(x1, y1, x2, y2, label):
-                return Annotation(Box(x1=x1, y1=y1, x2=x2, y2=y2),
-                                  labels=[create_gt_scored_label(label)])
-
-            item = self.coco_dataset[key]
-            divisor = np.tile([item['ori_shape'][:2][::-1]], 2)
-            bboxes = item['gt_bboxes'] / divisor
-            labels = item['gt_labels']
-
-            shapes = [create_gt_box(*coords, self.subsets[Subset.NONE].CLASSES[label_id]) for coords, label_id in zip(bboxes, labels)]
-
-            # FIXME. Subset.NONE is not correct.
-            dataset_item = MMDatasetItem(Image(data=item['img']), shapes, Subset.NONE)
-
-            # # FIXME. Support lazy data fetching.
-            # image = Image(data=item['img'])
-            # annotation_scene = AnnotationScene(kind=AnnotationSceneKind.ANNOTATION,
-            #                                 media_identifier=NullMediaIdentifier(),
-            #                                 annotations=shapes)
-            # dataset_item = DatasetItem(image, annotation_scene)
-            return dataset_item
+            return self._items[key]
         raise TypeError(
             f"Instance of type `{type(key).__name__}` cannot be used to access Dataset items. "
             f"Only slice and int are supported"
@@ -511,7 +511,9 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
         return DatasetIterator(self)
 
     def sort_items(self):
-        raise NotImplementedError
+        self._items = sorted(
+            self._items, key=lambda x: (x.image.media_id)
+        )
 
     def contains_media_id(self, media_id: ID) -> bool:
         """
@@ -527,90 +529,11 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
                 return True
         return False
 
-    ############################################################
-
-    # @abc.abstractmethod
-    # def get_labels(self, include_empty: bool = False) -> List[LabelEntity]:
-    #     """
-    #     Returns the list of all unique labels that are in the dataset, this does not
-    #     respect the ROI of the dataset items.
-
-    #     :param include_empty: set to True to include empty label (if exists) in the
-    #            output.
-    #     :return: list of labels that appear in the dataset
-    #     """
-    #     raise NotImplementedError
-
-    # @abc.abstractmethod
-    # def with_empty_annotations(
-    #     self, annotation_kind: AnnotationSceneKind = AnnotationSceneKind.PREDICTION
-    # ):
-    #     """
-    #     Produces a new dataset with empty annotation objects (no shapes or labels).
-
-    #     :return: a new dataset containing the same items, with empty annotation objects.
-    #     """
-    #     raise NotImplementedError
-
-    ############################################################
-
-    # def __copy__(self):
-    #     """
-    #     Shallow copy the dataset entity
-
-    #     :return: The copied dataset
-    #     """
-    #     return Dataset(
-    #         id=self.id,
-    #         dataset_storage=self.dataset_storage,
-    #         items=self.__items.copy(),
-    #         purpose=self.purpose,
-    #         mutable=self.mutable,
-    #     )
-
     def with_empty_annotations(
         self, annotation_kind: AnnotationSceneKind = AnnotationSceneKind.PREDICTION
     ) -> "MMDataset":
-        """
-        Produces a new dataset with empty annotation objects (no shapes or labels).
-        This is a convenience function to generate a dataset with empty annotations from another dataset.
-        This is particularly useful for evaluation on validation data and to build resultsets.
-
-        Assume a dataset containing user annotations.
-
-        >>> labeled_dataset = Dataset()  # user annotated dataset
-
-        Then, we want to see the performance of our task on this labeled_dataset,
-        which means we need to create a new dataset to be passed for analysis.
-
-        >>> prediction_dataset = labeled_dataset.with_empty_annotations()
-
-        Later, we can pass this prediction_dataset to the task analysis function.
-        By pairing the labeled_dataset and the prediction_dataset, the resultset can then be constructed.
-        Refer to :class:`~sc_sdk.entities.resultset.ResultSet` for more info.
-
-        :param annotation_kind: Sets the empty annotation to this kind. Default value: AnnotationSceneKind.PREDICTION
-        :return: a new dataset containing the same items, with empty annotation objects.
-        """
-        new_dataset = MMDataset(subsets=self.subsets)
-        new_dataset.project_labels = self.project_labels
-
-        for key in range(len(self)):
-            gt_boxes = new_dataset.coco_dataset[key]['gt_bboxes']
-            shape = list(gt_boxes.shape)
-            shape[0] = 0
-            new_dataset.coco_dataset[key]['gt_bboxes'] = np.empty(shape, dtype=gt_boxes.dtype)
-            gt_labels = new_dataset.coco_dataset[key]['gt_labels']
-            new_dataset.coco_dataset[key]['gt_labels'] = np.empty(0, dtype=gt_labels.dtype)
-
-        # for dataset_item in self:
-        #     if isinstance(dataset_item, MMDatasetItem):
-        #         new_dataset_item = MMDatasetItem(
-        #             image=dataset_item.image,
-        #             annotation=[],
-        #             subset=dataset_item.subset,
-        #         )
-        #         new_dataset.append(new_dataset_item)
+        new_items = [MMDatasetItem(x.image, annotation=[], subset=x.subset) for x in self._items]
+        new_dataset = MMDataset(items=new_items, purpose=self.purpose)
         return new_dataset
 
 
@@ -622,12 +545,13 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
         :param include_empty: set to True to include empty label (if exists) in the output.
         :return: list of labels that appear in the dataset
         """
-        label_set = set(
-            itertools.chain(
-                *[item.annotation_scene.get_labels(include_empty) for item in iter(self)]
-            )
-        )
-        return list(label_set)
+        return self.labels
+        # label_set = set(
+        #     itertools.chain(
+        #         *[item.annotation.get_labels(include_empty) for item in iter(self)]
+        #     )
+        # )
+        # return list(label_set)
 
 
 
