@@ -23,7 +23,7 @@ from ote_sdk.entities.model import ModelStatus
 from ote_sdk.entities.model_template import parse_model_template
 from ote_sdk.entities.subset import Subset
 from ote_sdk.entities.task_environment import TaskEnvironment
-from sc_sdk.entities.dataset_storage import NullDatasetStorage
+# from sc_sdk.entities.dataset_storage import NullDatasetStorage
 from sc_sdk.entities.model import Model
 from sc_sdk.entities.model_storage import NullModelStorage
 from sc_sdk.entities.optimized_model import ModelOptimizationType

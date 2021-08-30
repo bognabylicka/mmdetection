@@ -1,49 +1,61 @@
 import io
 import json
-import numpy as np
 import os
 import os.path as osp
 import random
 import time
-import torch
 import unittest
 import warnings
-import yaml
 from concurrent.futures import ThreadPoolExecutor
+from subprocess import run
 from typing import Optional
 
-from ote_sdk.configuration.helper import convert, create
+import numpy as np
+import torch
+import yaml
+from ote_sdk.configuration.helper import convert
+from ote_sdk.configuration.helper import create
+from ote_sdk.entities.annotation import Annotation
+# from ote_sdk.entities.annotation import AnnotationSceneKind
+# from sc_sdk.entities.annotation import AnnotationScene
+# from sc_sdk.entities.dataset_item import DatasetItem
+# from sc_sdk.entities.datasets import Dataset
+# from sc_sdk.entities.datasets import NullDatasetStorage
+from ote_sdk.entities.datasets import Subset
 from ote_sdk.entities.id import ID
 from ote_sdk.entities.metrics import Performance
+from ote_sdk.entities.model_template import parse_model_template
 from ote_sdk.entities.shapes.box import Box
 from ote_sdk.entities.shapes.ellipse import Ellipse
 from ote_sdk.entities.shapes.polygon import Polygon
-from ote_sdk.entities.train_parameters import TrainParameters
-from ote_sdk.entities.annotation import Annotation, AnnotationSceneKind
-from sc_sdk.entities.annotation import AnnotationScene
-from sc_sdk.entities.dataset_item import DatasetItem
-from sc_sdk.entities.datasets import Dataset, NullDatasetStorage, Subset
-from sc_sdk.entities.image import Image
-from sc_sdk.entities.media_identifier import ImageIdentifier
-from sc_sdk.entities.model import Model, ModelStatus, NullModelStorage
-from ote_sdk.entities.model_template import parse_model_template
-from sc_sdk.entities.optimized_model import (ModelOptimizationType,
-                                             ModelPrecision, OptimizedModel,
-                                             TargetDevice)
-from sc_sdk.entities.resultset import ResultSet
 from ote_sdk.entities.task_environment import TaskEnvironment
+from ote_sdk.entities.train_parameters import TrainParameters
+# from sc_sdk.entities.image import Image
+# from sc_sdk.entities.label import Label
+# from sc_sdk.entities.media_identifier import ImageIdentifier
+from sc_sdk.entities.model import Model
+from sc_sdk.entities.model import ModelStatus
+from sc_sdk.entities.model import NullModelStorage
+from sc_sdk.entities.optimized_model import ModelOptimizationType
+from sc_sdk.entities.optimized_model import ModelPrecision
+from sc_sdk.entities.optimized_model import OptimizedModel
+from sc_sdk.entities.optimized_model import TargetDevice
+from sc_sdk.entities.resultset import ResultSet
 from sc_sdk.tests.test_helpers import generate_random_annotated_image
-from sc_sdk.usecases.tasks.interfaces.export_interface import (ExportType,
-                                                               IExportTask)
+from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType
+from sc_sdk.usecases.tasks.interfaces.export_interface import IExportTask
 from sc_sdk.utils.project_factory import NullProject
-from subprocess import run
 
-from mmdet.apis.ote.apis.detection import (OpenVINODetectionTask,
-                                           OTEDetectionConfig,
-                                           OTEDetectionTask)
+from mmdet.apis.ote.apis.detection import OpenVINODetectionTask
+from mmdet.apis.ote.apis.detection import OTEDetectionConfig
+from mmdet.apis.ote.apis.detection import OTEDetectionTask
 from mmdet.apis.ote.apis.detection.config_utils import set_values_as_default
-from mmdet.apis.ote.apis.detection.ote_utils import (generate_label_schema,
-                                                     reload_hyper_parameters)
+from mmdet.apis.ote.apis.detection.ote_utils import generate_label_schema
+from mmdet.apis.ote.apis.detection.ote_utils import reload_hyper_parameters
+from mmdet.apis.ote.extension.datasets.mm_dataset import Image
+from mmdet.apis.ote.extension.datasets.mm_dataset import MMDataset
+from mmdet.apis.ote.extension.datasets.mm_dataset import MMDatasetItem
+from mmdet.apis.ote.extension.datasets.mm_dataset import Label
 
 
 class ModelTemplate(unittest.TestCase):
@@ -173,8 +185,12 @@ class TestOTEAPI(unittest.TestCase):
     """
 
     def init_environment(self, params, model_template, number_of_images=500):
-        labels_names = ('rectangle', 'ellipse', 'triangle')
-        labels_schema = generate_label_schema(labels_names)
+        labels = [
+            Label(name='rectangle', domain="detection", id=0),
+            Label(name='ellipse', domain="detection", id=1),
+            Label(name='triangle', domain="detection", id=2)
+        ]
+        labels_schema = generate_label_schema(labels)
         labels_list = labels_schema.get_labels(False)
         environment = TaskEnvironment(model=None, hyper_parameters=params, label_schema=labels_schema,
                                       model_template=model_template)
@@ -202,13 +218,15 @@ class TestOTEAPI(unittest.TestCase):
                 box_shapes.append(Annotation(Box(x1=box[0], y1=box[1], x2=box[2], y2=box[3]),
                                              labels=shape_labels))
 
-            image = Image(name=f'image_{i}', numpy=image_numpy, dataset_storage=NullDatasetStorage())
-            image_identifier = ImageIdentifier(image.id)
-            annotation = AnnotationScene(
-                kind=AnnotationSceneKind.ANNOTATION,
-                media_identifier=image_identifier,
-                annotations=box_shapes)
-            items.append(DatasetItem(media=image, annotation_scene=annotation))
+            image = Image(data=image_numpy, name=f'image_{i}')
+            items.append(MMDatasetItem(image, box_shapes))
+            # image = Image(name=f'image_{i}', numpy=image_numpy, dataset_storage=NullDatasetStorage())
+            # image_identifier = ImageIdentifier(image.id)
+            # annotation = AnnotationScene(
+            #     kind=AnnotationSceneKind.ANNOTATION,
+            #     media_identifier=image_identifier,
+            #     annotations=box_shapes)
+            # items.append(DatasetItem(media=image, annotation_scene=annotation))
         warnings.resetwarnings()
 
         rng = random.Random()
@@ -223,7 +241,8 @@ class TestOTEAPI(unittest.TestCase):
                 subset = Subset.TRAINING
             items[i].subset = subset
 
-        dataset = Dataset(NullDatasetStorage(), items)
+        # dataset = Dataset(NullDatasetStorage(), items)
+        dataset = MMDataset(items=items, labels=labels)
         return environment, dataset
 
     def setup_configurable_parameters(self, template_dir, num_iters=250):
@@ -322,7 +341,7 @@ class TestOTEAPI(unittest.TestCase):
         self.assertTrue(np.all(training_progress_curve[1:] >= training_progress_curve[:-1]))
 
     @staticmethod
-    def eval(task: OTEDetectionTask, model: Model, dataset: Dataset) -> Performance:
+    def eval(task: OTEDetectionTask, model: Model, dataset: MMDataset) -> Performance:
         start_time = time.time()
         result_dataset = task.infer(dataset.with_empty_annotations())
         end_time = time.time()

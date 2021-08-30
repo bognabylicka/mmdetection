@@ -40,6 +40,8 @@ from ote_sdk.entities.datasets import DatasetEntity
 from ote_sdk.entities.datasets import DatasetPurpose
 from ote_sdk.entities.datasets import Subset
 from ote_sdk.entities.id import ID
+from ote_sdk.entities.label import Color
+from ote_sdk.entities.label import Domain
 from ote_sdk.entities.label import LabelEntity
 from ote_sdk.entities.label import ScoredLabel
 from ote_sdk.entities.media import IMedia2DEntity
@@ -48,11 +50,13 @@ from ote_sdk.entities.shapes.box import Box
 from ote_sdk.entities.subset import Subset
 from ote_sdk.utils.shape_factory import ShapeFactory
 from ote_sdk.utils.time_utils import now
-from sc_sdk.entities.label import Label
 
 from mmdet.datasets import CocoDataset
-from mmdet.datasets import ConcatDataset
-from mmdet.datasets import ConcatenatedCocoDataset
+
+# from sc_sdk.entities.label import Label
+
+# from mmdet.datasets import ConcatDataset
+# from mmdet.datasets import ConcatenatedCocoDataset
 
 # from sc_sdk.entities.annotation import AnnotationScene
 # from sc_sdk.entities.annotation import NullMediaIdentifier
@@ -67,7 +71,7 @@ class ImageIdentifier(MediaIdentifierEntity):
     identifier_name = "image"
 
     def __init__(self, image_id: Optional[ID] = None):
-        self.__media_id = image_id if image_id is None else ID()
+        self.__media_id = image_id if image_id is not None else ID()
 
     @property
     def media_id(self) -> ID:
@@ -171,6 +175,35 @@ class Image(IMedia2DEntity):
         return self.__width
 
 
+# FIXME.
+class AnnotationScene:
+    def __init__(self, annotation):
+        self.annotations = annotation
+
+
+class Label(LabelEntity):
+    # pylint: disable=redefined-builtin, too-many-arguments; Requires refactor
+    def __init__(
+        self,
+        name: str,
+        domain: Domain,
+        color: Optional[Color] = None,
+        creation_date: Optional[datetime.datetime] = None,
+        is_empty: Optional[bool] = False,
+        id: Optional[ID] = None,
+    ):
+        id = ID() if id is None else id
+        color = Color.random() if color is None else color
+        creation_date = now() if creation_date is None else creation_date
+        super().__init__(
+            name=name,
+            id=id,
+            is_empty=is_empty,
+            color=color,
+            domain=domain,
+            creation_date=creation_date,
+        )
+
 class MMDatasetItem(DatasetItemEntity):
 
     def __init__(self,
@@ -180,6 +213,8 @@ class MMDatasetItem(DatasetItemEntity):
     ):
         self.image: Image = image
         self.annotation: List[Annotation] = list(annotation)
+        # FIXME.
+        self.annotation_scene = AnnotationScene(self.annotation)
         self.subset: Subset = subset
         self._roi = Annotation(Box.generate_full_box(), labels=[], id=ID())
 
@@ -297,7 +332,7 @@ class MMDatasetItem(DatasetItemEntity):
                 "such as segmentation).",
                 n_invalid_shapes,
             )
-        self.annotation.append(validated_annotations)
+        self.annotation.extend(validated_annotations)
 
     def append_labels(self, labels: List[ScoredLabel]):
         """
@@ -512,7 +547,7 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
 
     def sort_items(self):
         self._items = sorted(
-            self._items, key=lambda x: (x.image.media_id)
+            self._items, key=lambda x: (x.image.media_identifier.media_id)
         )
 
     def contains_media_id(self, media_id: ID) -> bool:
