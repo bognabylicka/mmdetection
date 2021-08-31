@@ -23,22 +23,21 @@ from ote_sdk.entities.model import ModelStatus
 from ote_sdk.entities.model_template import parse_model_template
 from ote_sdk.entities.subset import Subset
 from ote_sdk.entities.task_environment import TaskEnvironment
-# from sc_sdk.entities.dataset_storage import NullDatasetStorage
-from sc_sdk.entities.model import Model
 from sc_sdk.entities.model_storage import NullModelStorage
 from sc_sdk.entities.optimized_model import ModelOptimizationType
 from sc_sdk.entities.optimized_model import ModelPrecision
 from sc_sdk.entities.optimized_model import OptimizedModel
 from sc_sdk.entities.optimized_model import TargetDevice
 from sc_sdk.entities.project import NullProject
-from sc_sdk.entities.resultset import ResultSet
 from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType
 
 from mmdet.apis.ote.apis.detection.config_utils import set_values_as_default
-from mmdet.apis.ote.apis.detection.ote_utils import generate_label_schema
-from mmdet.apis.ote.apis.detection.ote_utils import get_task_class
-from mmdet.apis.ote.apis.detection.ote_utils import reload_hyper_parameters
-from mmdet.apis.ote.extension.datasets import MMDataset
+from mmdet.apis.ote.apis.detection.ote_utils.dataset import MMDataset
+from mmdet.apis.ote.apis.detection.ote_utils.label_schema import FlatLabelSchema
+from mmdet.apis.ote.apis.detection.ote_utils.misc import get_task_class
+from mmdet.apis.ote.apis.detection.ote_utils.misc import reload_hyper_parameters
+from mmdet.apis.ote.apis.detection.ote_utils.model import Model
+from mmdet.apis.ote.apis.detection.ote_utils.result_set import ResultSet
 
 logger = logging.getLogger(__name__)
 
@@ -51,97 +50,6 @@ def parse_args():
     parser.add_argument('--export', action='store_true')
     args = parser.parse_args()
     return args
-
-
-from typing import List
-from typing import Mapping
-from typing import Optional
-from typing import Union
-
-# from ote_sdk.entities.datasets import DatasetEntity
-# from ote_sdk.entities.id import ID
-# from ote_sdk.entities.metrics import NullPerformance, Performance
-# from ote_sdk.entities.model import (
-#     ModelConfiguration,
-#     ModelEntity,
-#     ModelPrecision,
-#     ModelStatus,
-# )
-# from ote_sdk.entities.model_template import TargetDevice
-# from ote_sdk.usecases.adapters.model_adapter import ModelAdapter
-# from ote_sdk.utils.time_utils import now
-
-
-# class Model(ModelEntity):
-#     def __init__(
-#         self,
-#         train_dataset: DatasetEntity,
-#         configuration: ModelConfiguration,
-#         *,
-#         creation_date: Optional[datetime.datetime] = None,
-#         performance: Optional[Performance] = None,
-#         previous_trained_revision: Optional[ModelEntity] = None,
-#         previous_revision: Optional[ModelEntity] = None,
-#         tags: Optional[List[str]] = None,
-#         data_source_dict: Optional[Mapping[str, Union["DataSource", bytes]]] = None,
-#         model_status: ModelStatus = ModelStatus.SUCCESS,
-#         training_duration: float = 0.0,
-#         precision: List[ModelPrecision] = None,
-#         latency: int = 0,
-#         fps_throughput: int = 0,
-#         target_device: TargetDevice = TargetDevice.CPU,
-#         target_device_type: Optional[str] = None,
-#         _id: Optional[ID] = None,
-#     ):
-#         _id = ID() if _id is None else _id
-#         performance = NullPerformance() if performance is None else performance
-#         creation_date = now() if creation_date is None else creation_date
-#         previous_trained_revision = (
-#             None
-#             if previous_trained_revision is None
-#             else previous_trained_revision
-#         )
-#         previous_revision = (
-#             None if previous_revision is None else previous_revision
-#         )
-
-#         try:
-#             version = previous_revision.version + 1
-#         except AttributeError:
-#             version = 1
-
-#         tags = [] if tags is None else tags
-#         precision = [] if precision is None else precision
-
-#         if not data_source_dict:
-#             if model_status == ModelStatus.SUCCESS:
-#                 raise ValueError(
-#                     "A data_source_dict must be provided for a successfully trained model."
-#                 )
-#             data_source_dict = {}
-#         model_adapters = {
-#             key: ModelAdapter(val) for key, val in data_source_dict.items()
-#         }
-
-#         super().__init__(
-#             _id=_id,
-#             creation_date=creation_date,
-#             train_dataset=train_dataset,
-#             previous_trained_revision=previous_trained_revision,
-#             previous_revision=previous_revision,
-#             version=version,
-#             tags=tags,
-#             model_status=model_status,
-#             performance=performance,
-#             training_duration=training_duration,
-#             configuration=configuration,
-#             model_adapters=model_adapters,
-#             precision=precision,
-#             latency=latency,
-#             fps_throughput=fps_throughput,
-#             target_device=target_device,
-#             target_device_type=target_device_type,
-#         )
 
 
 def main(args):
@@ -159,9 +67,7 @@ def main(args):
             })
 
     labels = dataset.get_labels()
-    labels_schema = generate_label_schema(labels)
-    # labels_list = labels_schema.get_labels(False)
-    # dataset.set_project_labels(labels_list)
+    labels_schema = FlatLabelSchema(labels)
 
     logger.info(f'Train dataset: {len(dataset.get_subset(Subset.TRAINING))} items')
     logger.info(f'Validation dataset: {len(dataset.get_subset(Subset.VALIDATION))} items')
@@ -189,17 +95,11 @@ def main(args):
     task = task_cls(task_environment=environment)
 
     logger.info('Train model')
-    # output_model = Model(
-    #     dataset,
-    #     environment.get_model_configuration(),
-    #     model_status=ModelStatus.NOT_READY
-    # )
     output_model = Model(
-        NullProject(),
-        NullModelStorage(),
         dataset,
         environment.get_model_configuration(),
-        model_status=ModelStatus.NOT_READY)
+        model_status=ModelStatus.NOT_READY
+    )
     task.train(dataset, output_model)
 
     logger.info('Get predictions on the validation set')

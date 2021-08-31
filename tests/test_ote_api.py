@@ -1,5 +1,6 @@
 import io
 import json
+import logging
 import os
 import os.path as osp
 import random
@@ -8,7 +9,9 @@ import unittest
 import warnings
 from concurrent.futures import ThreadPoolExecutor
 from subprocess import run
+from typing import List
 from typing import Optional
+from typing import Tuple
 
 import numpy as np
 import torch
@@ -16,32 +19,23 @@ import yaml
 from ote_sdk.configuration.helper import convert
 from ote_sdk.configuration.helper import create
 from ote_sdk.entities.annotation import Annotation
-# from ote_sdk.entities.annotation import AnnotationSceneKind
-# from sc_sdk.entities.annotation import AnnotationScene
-# from sc_sdk.entities.dataset_item import DatasetItem
-# from sc_sdk.entities.datasets import Dataset
-# from sc_sdk.entities.datasets import NullDatasetStorage
 from ote_sdk.entities.datasets import Subset
 from ote_sdk.entities.id import ID
+from ote_sdk.entities.label import ScoredLabel
 from ote_sdk.entities.metrics import Performance
+from ote_sdk.entities.model import ModelStatus
 from ote_sdk.entities.model_template import parse_model_template
 from ote_sdk.entities.shapes.box import Box
 from ote_sdk.entities.shapes.ellipse import Ellipse
+from ote_sdk.entities.shapes.polygon import Point
 from ote_sdk.entities.shapes.polygon import Polygon
 from ote_sdk.entities.task_environment import TaskEnvironment
 from ote_sdk.entities.train_parameters import TrainParameters
-# from sc_sdk.entities.image import Image
-# from sc_sdk.entities.label import Label
-# from sc_sdk.entities.media_identifier import ImageIdentifier
-from sc_sdk.entities.model import Model
-from sc_sdk.entities.model import ModelStatus
 from sc_sdk.entities.model import NullModelStorage
 from sc_sdk.entities.optimized_model import ModelOptimizationType
 from sc_sdk.entities.optimized_model import ModelPrecision
 from sc_sdk.entities.optimized_model import OptimizedModel
 from sc_sdk.entities.optimized_model import TargetDevice
-from sc_sdk.entities.resultset import ResultSet
-from sc_sdk.tests.test_helpers import generate_random_annotated_image
 from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType
 from sc_sdk.usecases.tasks.interfaces.export_interface import IExportTask
 from sc_sdk.utils.project_factory import NullProject
@@ -50,15 +44,19 @@ from mmdet.apis.ote.apis.detection import OpenVINODetectionTask
 from mmdet.apis.ote.apis.detection import OTEDetectionConfig
 from mmdet.apis.ote.apis.detection import OTEDetectionTask
 from mmdet.apis.ote.apis.detection.config_utils import set_values_as_default
-from mmdet.apis.ote.apis.detection.ote_utils import generate_label_schema
-from mmdet.apis.ote.apis.detection.ote_utils import reload_hyper_parameters
-from mmdet.apis.ote.extension.datasets.mm_dataset import Image
-from mmdet.apis.ote.extension.datasets.mm_dataset import MMDataset
-from mmdet.apis.ote.extension.datasets.mm_dataset import MMDatasetItem
-from mmdet.apis.ote.extension.datasets.mm_dataset import Label
+from mmdet.apis.ote.apis.detection.ote_utils.dataset import MMDataset
+from mmdet.apis.ote.apis.detection.ote_utils.dataset_item import MMDatasetItem
+from mmdet.apis.ote.apis.detection.ote_utils.image import Image
+from mmdet.apis.ote.apis.detection.ote_utils.label import Label
+from mmdet.apis.ote.apis.detection.ote_utils.label_schema import FlatLabelSchema
+from mmdet.apis.ote.apis.detection.ote_utils.misc import reload_hyper_parameters
+from mmdet.apis.ote.apis.detection.ote_utils.model import Model
+from mmdet.apis.ote.apis.detection.ote_utils.result_set import ResultSet
+
+logger = logging.getLogger(__name__)
 
 
-class ModelTemplate(unittest.TestCase):
+class ModelTemplateTestCase(unittest.TestCase):
 
     def test_reading_mnv2_ssd_256(self):
         parse_model_template('./configs/ote/custom-object-detection/mobilenet_v2-2s_ssd-256x256/template.yaml', '1')
@@ -78,6 +76,7 @@ class ModelTemplate(unittest.TestCase):
     def test_reading_resnet50_vfnet(self):
         parse_model_template('./configs/ote/custom-object-detection/resnet50_VFNet/template.yaml', '1')
 
+
 def test_configuration_yaml():
     configuration = OTEDetectionConfig(workspace_id=ID(), model_storage_id=ID())
     configuration_yaml_str = convert(configuration, str)
@@ -86,6 +85,7 @@ def test_configuration_yaml():
         configuration_yaml_loaded = yaml.safe_load(read_file)
     del configuration_yaml_converted['algo_backend']
     assert configuration_yaml_converted == configuration_yaml_loaded
+
 
 def test_set_values_as_default():
     template_dir = './configs/ote/custom-object-detection/mobilenet_v2-2s_ssd-256x256/'
@@ -111,6 +111,7 @@ def test_set_values_as_default():
     assert default_value == value
     hyper_parameters = create(hyper_parameters)
     assert default_value == hyper_parameters.learning_parameters.batch_size
+
 
 class SampleTestCase(unittest.TestCase):
     root_dir = '/tmp'
@@ -179,10 +180,146 @@ class SampleTestCase(unittest.TestCase):
         assert output.returncode == 0
 
 
-class TestOTEAPI(unittest.TestCase):
+class APITestCase(unittest.TestCase):
     """
     Collection of tests for OTE API and OTE Model Templates
     """
+
+    @staticmethod
+    def generate_random_annotated_image(
+        image_width: int,
+        image_height: int,
+        labels: List[Label],
+        min_size=50,
+        max_size=250,
+        shape: Optional[str] = None,
+        max_shapes: int = 10,
+        intensity_range: List[Tuple[int, int]] = None,
+        random_seed: Optional[int] = None,
+    ) -> Tuple[np.ndarray, List[Annotation]]:
+        """
+        Generate a random image with the corresponding annotation entities.
+
+        :param intensity_range: Intensity range for RGB channels ((r_min, r_max), (g_min, g_max), (b_min, b_max))
+        :param max_shapes: Maximum amount of shapes in the image
+        :param shape: {"rectangle", "ellipse", "triangle"}
+        :param image_height: Height of the image
+        :param image_width: Width of the image
+        :param labels: Task Labels that should be applied to the respective shape
+        :param min_size: Minimum size of the shape(s)
+        :param max_size: Maximum size of the shape(s)
+        :param random_seed: Seed to initialize the random number generator
+        :return: uint8 array, list of shapes
+        """
+        from skimage.draw import random_shapes
+        from skimage.draw import rectangle
+
+        if intensity_range is None:
+            intensity_range = [(100, 200)]
+
+        image1: Optional[np.ndarray] = None
+        sc_labels = []
+        # Sporadically, it might happen there is no shape in the image, especially on low-res images.
+        # It'll retry max 5 times until we see a shape, and otherwise raise a runtime error
+        if (
+            shape == "ellipse"
+        ):  # ellipse shape is not available in random_shapes function. use circle instead
+            shape = "circle"
+        for _ in range(5):
+            rand_image, sc_labels = random_shapes(
+                (image_height, image_width),
+                min_shapes=1,
+                max_shapes=max_shapes,
+                intensity_range=intensity_range,
+                min_size=min_size,
+                max_size=max_size,
+                shape=shape,
+                random_seed=random_seed,
+            )
+            num_shapes = len(sc_labels)
+            if num_shapes > 0:
+                image1 = rand_image
+                break
+
+        if image1 is None:
+            raise RuntimeError(
+                "Was not able to generate a random image that contains any shapes"
+            )
+
+        annotations: List[Annotation] = []
+        for sc_label in sc_labels:
+            sc_label_name = sc_label[0]
+            sc_label_shape_r = sc_label[1][0]
+            sc_label_shape_c = sc_label[1][1]
+            y_min, y_max = max(0.0, float(sc_label_shape_r[0] / image_height)), min(
+                1.0, float(sc_label_shape_r[1] / image_height)
+            )
+            x_min, x_max = max(0.0, float(sc_label_shape_c[0] / image_width)), min(
+                1.0, float(sc_label_shape_c[1] / image_width)
+            )
+
+            if sc_label_name == "ellipse":
+                # Fix issue with newer scikit-image libraries that generate ellipses.
+                # For now we render a rectangle on top of it
+                sc_label_name = "rectangle"
+                rr, cc = rectangle(
+                    start=(sc_label_shape_r[0], sc_label_shape_c[0]),
+                    end=(sc_label_shape_r[1] - 1, sc_label_shape_c[1] - 1),
+                    shape=image1.shape,
+                )
+                image1[rr, cc] = (
+                    random.randint(0, 200),
+                    random.randint(0, 200),
+                    random.randint(0, 200),
+                )
+            if sc_label_name == "circle":
+                sc_label_name = "ellipse"
+
+            label_matches = [label for label in labels if sc_label_name == label.name]
+            if len(label_matches) > 0:
+                label = label_matches[0]
+                box_annotation = Annotation(
+                    Box(x1=x_min, y1=y_min, x2=x_max, y2=y_max),
+                    labels=[ScoredLabel(label, probability=1.0)],
+                )
+
+                annotation: Annotation
+
+                if label.name == "ellipse":
+                    annotation = Annotation(
+                        Ellipse(
+                            x1=box_annotation.shape.x1,
+                            y1=box_annotation.shape.y1,
+                            x2=box_annotation.shape.x2,
+                            y2=box_annotation.shape.y2,
+                        ),
+                        labels=box_annotation.get_labels(include_empty=True),
+                    )
+                elif label.name == "triangle":
+                    points = [
+                        Point(
+                            x=(box_annotation.shape.x1 + box_annotation.shape.x2) / 2,
+                            y=box_annotation.shape.y1,
+                        ),
+                        Point(x=box_annotation.shape.x1, y=box_annotation.shape.y2),
+                        Point(x=box_annotation.shape.x2, y=box_annotation.shape.y2),
+                    ]
+
+                    annotation = Annotation(
+                        Polygon(points=points),
+                        labels=box_annotation.get_labels(include_empty=True),
+                    )
+                else:
+                    annotation = box_annotation
+
+                annotations.append(annotation)
+            else:
+                logger.warning(
+                    "Generated a random image, but was not able to associate a label with a shape. "
+                    f"The name of the shape was `{sc_label_name}`. "
+                )
+
+        return image1, annotations
 
     def init_environment(self, params, model_template, number_of_images=500):
         labels = [
@@ -190,7 +327,7 @@ class TestOTEAPI(unittest.TestCase):
             Label(name='ellipse', domain="detection", id=1),
             Label(name='triangle', domain="detection", id=2)
         ]
-        labels_schema = generate_label_schema(labels)
+        labels_schema = FlatLabelSchema(labels)
         labels_list = labels_schema.get_labels(False)
         environment = TaskEnvironment(model=None, hyper_parameters=params, label_schema=labels_schema,
                                       model_template=model_template)
@@ -198,13 +335,13 @@ class TestOTEAPI(unittest.TestCase):
         warnings.filterwarnings('ignore', message='.* coordinates .* are out of bounds.*')
         items = []
         for i in range(0, number_of_images):
-            image_numpy, shapes = generate_random_annotated_image(image_width=640,
-                                                                  image_height=480,
-                                                                  labels=labels_list,
-                                                                  max_shapes=20,
-                                                                  min_size=50,
-                                                                  max_size=100,
-                                                                  random_seed=None)
+            image_numpy, shapes = self.generate_random_annotated_image(image_width=640,
+                                                                       image_height=480,
+                                                                       labels=labels_list,
+                                                                       max_shapes=20,
+                                                                       min_size=50,
+                                                                       max_size=100,
+                                                                       random_seed=None)
             # Convert all shapes to bounding boxes
             box_shapes = []
             for shape in shapes:
@@ -220,13 +357,6 @@ class TestOTEAPI(unittest.TestCase):
 
             image = Image(data=image_numpy, name=f'image_{i}')
             items.append(MMDatasetItem(image, box_shapes))
-            # image = Image(name=f'image_{i}', numpy=image_numpy, dataset_storage=NullDatasetStorage())
-            # image_identifier = ImageIdentifier(image.id)
-            # annotation = AnnotationScene(
-            #     kind=AnnotationSceneKind.ANNOTATION,
-            #     media_identifier=image_identifier,
-            #     annotations=box_shapes)
-            # items.append(DatasetItem(media=image, annotation_scene=annotation))
         warnings.resetwarnings()
 
         rng = random.Random()
@@ -284,8 +414,6 @@ class TestOTEAPI(unittest.TestCase):
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='train_thread')
 
         output_model = Model(
-                NullProject(),
-                NullModelStorage(),
                 dataset,
                 detection_environment.get_model_configuration(),
                 model_status=ModelStatus.NOT_READY)
@@ -329,8 +457,6 @@ class TestOTEAPI(unittest.TestCase):
         train_parameters = TrainParameters
         train_parameters.update_progress = progress_callback
         output_model = Model(
-                NullProject(),
-                NullModelStorage(),
                 dataset,
                 detection_environment.get_model_configuration(),
                 model_status=ModelStatus.NOT_READY)
@@ -380,8 +506,6 @@ class TestOTEAPI(unittest.TestCase):
         # validation f-measure is higher than the threshold, which is a pretty low bar
         # considering that the dataset is so easy
         output_model = Model(
-                NullProject(),
-                NullModelStorage(),
                 dataset,
                 detection_environment.get_model_configuration(),
                 model_status=ModelStatus.NOT_READY)
@@ -418,8 +542,6 @@ class TestOTEAPI(unittest.TestCase):
         print('Reloading model.')
         first_model = output_model
         new_model = Model(
-            NullProject(),
-            NullModelStorage(),
             dataset,
             detection_environment.get_model_configuration(),
             model_status=ModelStatus.NOT_READY)
@@ -462,7 +584,7 @@ class TestOTEAPI(unittest.TestCase):
             export_performance = ov_task.evaluate(resultset)
             print(export_performance)
             performance_delta = export_performance.score.value - validation_performance.score.value
-            perf_delta_tolerance = 0.0005
+            perf_delta_tolerance = 0.005
             self.assertLess(np.abs(performance_delta), perf_delta_tolerance,
                         msg=f'Expected no or very small performance difference after export. Performance delta '
                             f'({validation_performance.score.value} vs {export_performance.score.value}) was '
@@ -483,5 +605,5 @@ class TestOTEAPI(unittest.TestCase):
     def test_training_custom_mobilenet_ssd(self):
         self.train_and_eval(osp.join('configs', 'ote', 'custom-object-detection', 'mobilenetV2_SSD'))
 
-    def test_training_custom_mobilenet_vfnet(self):
+    def test_training_custom_resnet_vfnet(self):
         self.train_and_eval(osp.join('configs', 'ote', 'custom-object-detection', 'resnet50_VFNet'))

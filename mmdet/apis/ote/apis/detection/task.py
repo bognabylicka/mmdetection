@@ -54,28 +54,29 @@ from ote_sdk.usecases.tasks.interfaces.evaluate_interface import IEvaluationTask
 from ote_sdk.usecases.tasks.interfaces.inference_interface import IInferenceTask
 from ote_sdk.usecases.tasks.interfaces.training_interface import ITrainingTask
 from ote_sdk.usecases.tasks.interfaces.unload_interface import IUnload
-from sc_sdk.entities.datasets import Dataset
-from sc_sdk.entities.model import Model
 from sc_sdk.entities.optimized_model import ModelPrecision
 from sc_sdk.entities.optimized_model import OptimizedModel
-from sc_sdk.entities.resultset import ResultSet
 from sc_sdk.usecases.tasks.interfaces.export_interface import ExportType
 from sc_sdk.usecases.tasks.interfaces.export_interface import IExportTask
 
 from mmdet.apis import export_model
 from mmdet.apis import single_gpu_test
 from mmdet.apis import train_detector
-from mmdet.apis.ote.apis.detection.config_utils import patch_config
-from mmdet.apis.ote.apis.detection.config_utils import prepare_for_testing
-from mmdet.apis.ote.apis.detection.config_utils import prepare_for_training
-from mmdet.apis.ote.apis.detection.config_utils import set_hyperparams
-from mmdet.apis.ote.apis.detection.configuration import OTEDetectionConfig
-from mmdet.apis.ote.apis.detection.ote_utils import TrainingProgressCallback
 from mmdet.apis.ote.extension.utils.hooks import OTELoggerHook
 from mmdet.datasets import build_dataloader
 from mmdet.datasets import build_dataset
 from mmdet.models import build_detector
 from mmdet.parallel import MMDataCPU
+
+from .config_utils import patch_config
+from .config_utils import prepare_for_testing
+from .config_utils import prepare_for_training
+from .config_utils import set_hyperparams
+from .configuration import OTEDetectionConfig
+from .ote_utils.dataset import MMDataset as Dataset
+from .ote_utils.misc import TrainingProgressCallback
+from .ote_utils.model import Model
+from .ote_utils.result_set import ResultSet
 
 logger = logging.getLogger(__name__)
 

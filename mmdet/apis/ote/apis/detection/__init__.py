@@ -23,16 +23,14 @@ from .config_utils import set_hyperparams
 from .config_utils import set_values_as_default
 from .configuration import OTEDetectionConfig
 from .openvino_task import OpenVINODetectionTask
-from .ote_utils import generate_label_schema
-from .ote_utils import get_task_class
-from .ote_utils import load_template
-from .ote_utils import reload_hyper_parameters
+from .ote_utils.misc import get_task_class
+from .ote_utils.misc import load_template
+from .ote_utils.misc import reload_hyper_parameters
 from .task import OTEDetectionTask
 
 __all__ = [
     config_from_string,
     config_to_string,
-    generate_label_schema,
     get_task_class,
     load_template,
     OpenVINODetectionTask,

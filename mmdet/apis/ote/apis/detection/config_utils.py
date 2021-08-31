@@ -23,16 +23,16 @@ from typing import Optional
 
 from mmcv import Config
 from mmcv import ConfigDict
+from ote_sdk.entities.label import LabelEntity
 from ote_sdk.usecases.reporting.time_monitor_callback import TimeMonitorCallback
-from sc_sdk.entities.datasets import Dataset
-from sc_sdk.entities.label import Label
 
 from .configuration import OTEDetectionConfig
+from .ote_utils.dataset import MMDataset as Dataset
 
 logger = logging.getLogger(__name__)
 
 
-def patch_config(config: Config, work_dir: str, labels: List[Label], random_seed: Optional[int] = None):
+def patch_config(config: Config, work_dir: str, labels: List[LabelEntity], random_seed: Optional[int] = None):
     # Set runner if not defined.
     if 'runner' not in config:
         config.runner = {'type': 'EpochBasedRunner'}

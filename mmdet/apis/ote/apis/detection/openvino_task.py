@@ -32,13 +32,13 @@ from ote_sdk.usecases.evaluation.metrics_helper import MetricsHelper
 from ote_sdk.usecases.tasks.interfaces.evaluate_interface import IEvaluationTask
 from ote_sdk.usecases.tasks.interfaces.inference_interface import IInferenceTask
 from sc_sdk.entities.annotation import AnnotationScene
-from sc_sdk.entities.datasets import Dataset
-from sc_sdk.entities.label import Label
-from sc_sdk.entities.media_identifier import ImageIdentifier
-from sc_sdk.entities.resultset import ResultSet
 from sc_sdk.usecases.exportable_code.inference import BaseOpenVINOInferencer
 
 from .configuration import OTEDetectionConfig
+from .ote_utils.dataset import MMDataset as Dataset
+from .ote_utils.image import ImageIdentifier
+from .ote_utils.label import Label
+from .ote_utils.result_set import ResultSet
 
 
 def get_output(net, outputs, name):
