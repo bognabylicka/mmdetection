@@ -128,6 +128,8 @@ class MMDataset(DatasetEntity, Iterable[DatasetItemEntity]):
                                    classes=classes,
                                    test_mode=test_mode)
         coco_dataset.test_mode = False
+        for label_name in classes:
+            self._find_label_by_name(label_name)
 
         for item in coco_dataset:
             def create_gt_box(x1, y1, x2, y2, label_name):
