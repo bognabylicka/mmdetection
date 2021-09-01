@@ -30,7 +30,6 @@ from ote_sdk.entities.annotation import AnnotationSceneKind
 from ote_sdk.entities.dataset_item import DatasetItemEntity
 from ote_sdk.entities.datasets import DatasetEntity
 from ote_sdk.entities.datasets import DatasetPurpose
-from ote_sdk.entities.datasets import Subset
 from ote_sdk.entities.id import ID
 from ote_sdk.entities.label import LabelEntity
 from ote_sdk.entities.label import ScoredLabel
