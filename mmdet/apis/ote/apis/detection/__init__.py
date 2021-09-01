@@ -24,14 +24,12 @@ from .config_utils import set_values_as_default
 from .configuration import OTEDetectionConfig
 from .openvino_task import OpenVINODetectionTask
 from .ote_utils.misc import get_task_class
-from .ote_utils.misc import load_template
 from .task import OTEDetectionTask
 
 __all__ = [
     config_from_string,
     config_to_string,
     get_task_class,
-    load_template,
     OpenVINODetectionTask,
     OTEDetectionConfig,
     OTEDetectionTask,
