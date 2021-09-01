@@ -49,7 +49,6 @@ from mmdet.apis.ote.apis.detection.ote_utils.dataset_item import MMDatasetItem
 from mmdet.apis.ote.apis.detection.ote_utils.image import Image
 from mmdet.apis.ote.apis.detection.ote_utils.label import Label
 from mmdet.apis.ote.apis.detection.ote_utils.label_schema import FlatLabelSchema
-from mmdet.apis.ote.apis.detection.ote_utils.misc import reload_hyper_parameters
 from mmdet.apis.ote.apis.detection.ote_utils.model import Model
 from mmdet.apis.ote.apis.detection.ote_utils.result_set import ResultSet
 
@@ -91,11 +90,6 @@ def test_set_values_as_default():
     template_dir = './configs/ote/custom-object-detection/mobilenet_v2-2s_ssd-256x256/'
     template_file = osp.join(template_dir, 'template.yaml')
     model_template = parse_model_template(template_file, '1')
-
-    # Here we have to reload parameters manually because
-    # `parse_model_template` was called when `configuration.yaml` was not near `template.yaml.`
-    if not model_template.hyper_parameters.data:
-        reload_hyper_parameters(model_template)
 
     hyper_parameters = model_template.hyper_parameters.data
     # value that comes from template.yaml
@@ -377,11 +371,6 @@ class APITestCase(unittest.TestCase):
 
     def setup_configurable_parameters(self, template_dir, num_iters=250):
         model_template = parse_model_template(osp.join(template_dir, 'template.yaml'), '1')
-
-        # Here we have to reload parameters manually because
-        # `parse_model_template` was called when `configuration.yaml` was not near `template.yaml.`
-        if not model_template.hyper_parameters.data:
-            reload_hyper_parameters(model_template)
 
         hyper_parameters = model_template.hyper_parameters.data
         set_values_as_default(hyper_parameters)

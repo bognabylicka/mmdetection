@@ -35,12 +35,10 @@ from mmdet.apis.ote.apis.detection.config_utils import set_values_as_default
 from mmdet.apis.ote.apis.detection.ote_utils.dataset import MMDataset
 from mmdet.apis.ote.apis.detection.ote_utils.label_schema import FlatLabelSchema
 from mmdet.apis.ote.apis.detection.ote_utils.misc import get_task_class
-from mmdet.apis.ote.apis.detection.ote_utils.misc import reload_hyper_parameters
 from mmdet.apis.ote.apis.detection.ote_utils.model import Model
 from mmdet.apis.ote.apis.detection.ote_utils.result_set import ResultSet
 
 logger = logging.getLogger(__name__)
-
 
 
 def parse_args():
@@ -48,8 +46,7 @@ def parse_args():
     parser.add_argument('template_file_path', help='path to template file')
     parser.add_argument('--data-dir', default='data')
     parser.add_argument('--export', action='store_true')
-    args = parser.parse_args()
-    return args
+    return parser.parse_args()
 
 
 def main(args):
@@ -74,11 +71,6 @@ def main(args):
 
     logger.info('Load model template')
     model_template = parse_model_template(args.template_file_path, '1')
-
-    # Here we have to reload parameters manually because
-    # `parse_model_template` was called when `configuration.yaml` was not near `template.yaml.`
-    if not model_template.hyper_parameters.data:
-        reload_hyper_parameters(model_template)
 
     hyper_parameters = model_template.hyper_parameters.data
     set_values_as_default(hyper_parameters)
@@ -154,5 +146,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    args = parse_args()
-    sys.exit(main(args) or 0)
+    sys.exit(main(parse_args()) or 0)

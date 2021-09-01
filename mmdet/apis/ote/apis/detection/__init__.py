@@ -25,7 +25,6 @@ from .configuration import OTEDetectionConfig
 from .openvino_task import OpenVINODetectionTask
 from .ote_utils.misc import get_task_class
 from .ote_utils.misc import load_template
-from .ote_utils.misc import reload_hyper_parameters
 from .task import OTEDetectionTask
 
 __all__ = [
@@ -39,7 +38,6 @@ __all__ = [
     patch_config,
     prepare_for_testing,
     prepare_for_training,
-    reload_hyper_parameters,
     save_config_to_file,
     set_hyperparams,
     set_values_as_default,
