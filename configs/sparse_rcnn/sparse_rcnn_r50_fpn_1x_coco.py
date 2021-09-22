@@ -6,7 +6,6 @@ num_stages = 6
 num_proposals = 100
 model = dict(
     type='SparseRCNN',
-    pretrained='torchvision://resnet50',
     backbone=dict(
         type='ResNet',
         depth=50,
@@ -15,7 +14,8 @@ model = dict(
         frozen_stages=1,
         norm_cfg=dict(type='BN', requires_grad=True),
         norm_eval=True,
-        style='pytorch'),
+        style='pytorch',
+        init_cfg=dict(type='Pretrained', checkpoint='torchvision://resnet50')),
     neck=dict(
         type='FPN',
         in_channels=[256, 512, 1024, 2048],
@@ -92,4 +92,4 @@ optimizer = dict(_delete_=True, type='AdamW', lr=0.000025, weight_decay=0.0001)
 optimizer_config = dict(_delete_=True, grad_clip=dict(max_norm=1, norm_type=2))
 # learning policy
 lr_config = dict(policy='step', step=[8, 11])
-total_epochs = 12
+runner = dict(type='EpochBasedRunner', max_epochs=12)

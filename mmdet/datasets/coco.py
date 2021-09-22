@@ -1,50 +1,21 @@
-import copy
+# Copyright (c) OpenMMLab. All rights reserved.
 import itertools
 import logging
 import os.path as osp
 import tempfile
+import warnings
 from collections import OrderedDict
 
-import cv2
 import mmcv
 import numpy as np
 from mmcv.utils import print_log
-import os
-from pycocotools.coco import COCO
-from pycocotools.cocoeval import COCOeval
-from pycocotools.mask import decode
 from terminaltables import AsciiTable
 
 from mmdet.core import eval_recalls
-from mmdet.core import text_eval
+from .api_wrappers import COCO, COCOeval
 from .builder import DATASETS
 from .custom import CustomDataset
 
-try:
-    import pycocotools
-    if not hasattr(pycocotools, '__sphinx_mock__'):  # for doc generation
-        assert pycocotools.__version__ >= '12.0.2'
-except AssertionError:
-    raise AssertionError('Incompatible version of pycocotools is installed. '
-                         'Run pip uninstall pycocotools first. Then run pip '
-                         'install mmpycocotools to install open-mmlab forked '
-                         'pycocotools.')
-
-
-def get_polygon(segm, bbox, return_rect):
-    xmin, ymin, xmax, ymax, conf = bbox
-    if segm is not None:
-        mask = decode(segm)
-        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]
-        if contours:
-            contour = sorted(contours, key=lambda x: -cv2.contourArea(x))[0]
-            if return_rect:
-                return cv2.boxPoints(cv2.minAreaRect(contour)).reshape(-1), conf
-            else:
-                return contour.reshape(-1), conf
-    contour = [xmin, ymin, xmax, ymin, xmax, ymax, xmin, ymax]
-
-    return contour, conf
 
 @DATASETS.register_module()
 class CocoDataset(CustomDataset):
@@ -64,10 +35,6 @@ class CocoDataset(CustomDataset):
                'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock',
                'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush')
 
-    def __init__(self, min_size=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.min_size = min_size
-
     def load_annotations(self, ann_file):
         """Load annotation from COCO style annotation file.
 
@@ -79,14 +46,22 @@ class CocoDataset(CustomDataset):
         """
 
         self.coco = COCO(ann_file)
+        # The order of returned `cat_ids` will not
+        # change with the order of the CLASSES
         self.cat_ids = self.coco.get_cat_ids(cat_names=self.CLASSES)
+
         self.cat2label = {cat_id: i for i, cat_id in enumerate(self.cat_ids)}
         self.img_ids = self.coco.get_img_ids()
         data_infos = []
+        total_ann_ids = []
         for i in self.img_ids:
             info = self.coco.load_imgs([i])[0]
             info['filename'] = info['file_name']
             data_infos.append(info)
+            ann_ids = self.coco.get_ann_ids(img_ids=[i])
+            total_ann_ids.extend(ann_ids)
+        assert len(set(total_ann_ids)) == len(
+            total_ann_ids), f"Annotation ids in '{ann_file}' are not unique!"
         return data_infos
 
     def get_ann_info(self, idx):
@@ -169,9 +144,6 @@ class CocoDataset(CustomDataset):
                 continue
             if ann['area'] <= 0 or w < 1 or h < 1:
                 continue
-            if self.min_size is not None:
-                if w < self.min_size or h < self.min_size:
-                    continue
             if ann['category_id'] not in self.cat_ids:
                 continue
             bbox = [x1, y1, x1 + w, y1 + h]
@@ -263,7 +235,7 @@ class CocoDataset(CustomDataset):
         segm_json_results = []
         for idx in range(len(self)):
             img_id = self.img_ids[idx]
-            det, seg = results[idx][:2]
+            det, seg = results[idx]
             for label in range(len(det)):
                 # bbox results
                 bboxes = det[label]
@@ -395,7 +367,6 @@ class CocoDataset(CustomDataset):
                  classwise=False,
                  proposal_nums=(100, 300, 1000),
                  iou_thrs=None,
-                 score_thr=-1,
                  metric_items=None):
         """Evaluation in COCO protocol.
 
@@ -412,8 +383,6 @@ class CocoDataset(CustomDataset):
             proposal_nums (Sequence[int]): Proposal number used for evaluating
                 recalls, such as recall@100, recall@1000.
                 Default: (100, 300, 1000).
-            score_thr (float): Score threshold used to calculate
-                f1-score for text detection task.
             iou_thrs (Sequence[float], optional): IoU threshold used for
                 evaluating recalls/mAPs. If set to a list, the average of all
                 IoUs will also be computed. If not specified, [0.50, 0.55,
@@ -431,7 +400,7 @@ class CocoDataset(CustomDataset):
         """
 
         metrics = metric if isinstance(metric, list) else [metric]
-        allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast', 'f1']
+        allowed_metrics = ['bbox', 'segm', 'proposal', 'proposal_fast']
         for metric in metrics:
             if metric not in allowed_metrics:
                 raise KeyError(f'metric {metric} is not supported')
@@ -447,7 +416,6 @@ class CocoDataset(CustomDataset):
         eval_results = OrderedDict()
         cocoGt = self.coco
         for metric in metrics:
-            cocoGt = copy.deepcopy(self.coco)
             msg = f'Evaluating {metric}...'
             if logger is None:
                 msg = '\n' + msg
@@ -464,11 +432,27 @@ class CocoDataset(CustomDataset):
                 print_log(log_msg, logger=logger)
                 continue
 
-            metric_type = 'bbox' if metric == 'f1' else metric
-            if metric_type not in result_files:
-                raise KeyError(f'{metric_type} is not in results')
+            iou_type = 'bbox' if metric == 'proposal' else metric
+            if metric not in result_files:
+                raise KeyError(f'{metric} is not in results')
             try:
-                cocoDt = cocoGt.loadRes(result_files[metric_type])
+                predictions = mmcv.load(result_files[metric])
+                if iou_type == 'segm':
+                    # Refer to https://github.com/cocodataset/cocoapi/blob/master/PythonAPI/pycocotools/coco.py#L331  # noqa
+                    # When evaluating mask AP, if the results contain bbox,
+                    # cocoapi will use the box area instead of the mask area
+                    # for calculating the instance area. Though the overall AP
+                    # is not affected, this leads to different
+                    # small/medium/large mask AP results.
+                    for x in predictions:
+                        x.pop('bbox')
+                    warnings.simplefilter('once')
+                    warnings.warn(
+                        'The key "bbox" is deleted for more accurate mask AP '
+                        'of small/medium/large instances since v2.12.0. This '
+                        'does not change the overall mAP calculation.',
+                        UserWarning)
+                cocoDt = cocoGt.loadRes(predictions)
             except IndexError:
                 print_log(
                     'The testing results of the whole dataset is empty.',
@@ -476,7 +460,6 @@ class CocoDataset(CustomDataset):
                     level=logging.ERROR)
                 break
 
-            iou_type = 'bbox' if metric in {'proposal', 'f1'} else metric
             cocoEval = COCOeval(cocoGt, cocoDt, iou_type)
             cocoEval.params.catIds = self.cat_ids
             cocoEval.params.imgIds = self.img_ids
@@ -519,43 +502,9 @@ class CocoDataset(CustomDataset):
                         f'{cocoEval.stats[coco_metric_names[item]]:.3f}')
                     eval_results[item] = val
             else:
-                if metric == 'f1':
-                    predictions = []
-                    for res in results:
-                        if isinstance(res[0], list):
-                            boxes = res[0][0]
-                            segms = res[1][0]
-                        else:
-                            boxes = res[0]
-                            segms = [None for _ in boxes]
-
-                        per_image_predictions = []
-
-                        for bbox, segm in zip(boxes, segms):
-                            contour, conf = get_polygon(segm, bbox, return_rect=True)
-                            per_image_predictions.append({
-                                'segmentation': contour,
-                                'score': conf,
-                            })
-
-                        predictions.append(per_image_predictions)
-
-                    gt_annotations = cocoEval.cocoGt.imgToAnns
-                    recall, precision, hmean, _ = text_eval(
-                        predictions, gt_annotations, score_thr,
-                        show_recall_graph=False,
-                        use_transcriptions=False)
-                    print('Text detection recall={:.4f} precision={:.4f} hmean={:.4f}'.
-                          format(recall, precision, hmean))
-                    eval_results[metric + '/hmean'] = float(f'{hmean:.3f}')
-                    eval_results[metric + '/precision'] = float(f'{precision:.3f}')
-                    eval_results[metric + '/recall'] = float(f'{recall:.3f}')
-                    continue
-
                 cocoEval.evaluate()
                 cocoEval.accumulate()
                 cocoEval.summarize()
-
                 if classwise:  # Compute per-category AP
                     # Compute per-category AP
                     # from https://github.com/facebookresearch/detectron2/
@@ -608,78 +557,3 @@ class CocoDataset(CustomDataset):
         if tmp_dir is not None:
             tmp_dir.cleanup()
         return eval_results
-
-
-@DATASETS.register_module()
-class ConcatenatedCocoDataset(CocoDataset):
-    def __init__(self, concatenated_dataset):
-        for dataset in concatenated_dataset.datasets:
-            assert isinstance(dataset, CocoDataset), type(dataset)
-            assert dataset.cat_ids == concatenated_dataset.datasets[0].cat_ids
-            assert dataset.cat2label == concatenated_dataset.datasets[0].cat2label
-            assert str(dataset.pipeline) == str(concatenated_dataset.datasets[0].pipeline), f'{dataset.pipeline}'
-            assert dataset.proposals == concatenated_dataset.datasets[0].proposals
-
-        self.CLASSES = concatenated_dataset.datasets[0].CLASSES
-        self.test_mode = concatenated_dataset.datasets[0].test_mode
-        self.filter_empty_gt = concatenated_dataset.datasets[0].filter_empty_gt
-        self.cat_ids = concatenated_dataset.datasets[0].cat_ids
-        self.cat2label = concatenated_dataset.datasets[0].cat2label
-        self.pipeline = concatenated_dataset.datasets[0].pipeline
-        self.proposals = concatenated_dataset.datasets[0].proposals
-        self.img_ids = []
-        self.data_infos = []
-        self.flag = None
-        self.ann_infos = []
-        self.img_prefix = None
-        self.seg_prefix = None
-        self.proposal_file = None
-        self.coco = None
-        self.min_size = concatenated_dataset.datasets[0].min_size
-
-        for dataset in concatenated_dataset.datasets:
-            img_shift = 0 if not self.img_ids else max(self.img_ids) + 1
-
-            for img_id in dataset.img_ids:
-                self.img_ids.append(img_id + img_shift)
-
-            for im_info in dataset.data_infos:
-                im_info = dict(im_info)
-                im_info['id'] += img_shift
-                im_info['filename'] = os.path.join(dataset.img_prefix, im_info['filename'])
-                self.data_infos.append(im_info)
-
-            if self.coco is None:
-                self.coco = dataset.coco
-                self.coco.dataset = {'images': dataset.coco.dataset['images'],
-                                     'categories': dataset.coco.dataset['categories']}
-            else:
-                for cat in dataset.coco.catToImgs:
-                    self.coco.catToImgs[cat].extend([img_id + img_shift for img_id in dataset.coco.catToImgs[cat]])
-
-                ann_shift = max(self.coco.anns) + 1
-                for k, v in dataset.coco.anns.items():
-                    v['image_id'] += img_shift
-                    v['id'] += ann_shift
-                    self.coco.anns[k + ann_shift] = v
-
-                for k, v in dataset.coco.imgs.items():
-                    v['id'] += img_shift
-                    self.coco.imgs[k + img_shift] = v
-
-                for k, v in dataset.coco.imgToAnns.items():
-                    # indices in annotations have been changed above
-                    self.coco.imgToAnns[k + img_shift] = v
-
-                for v in dataset.coco.dataset['images']:
-                    v['id'] += img_shift
-                    self.coco.dataset['images'].append(v)
-
-            if hasattr(dataset, 'flag'):
-                if self.flag is None:
-                    self.flag = dataset.flag
-                else:
-                    self.flag = np.concatenate([self.flag, dataset.flag], axis=0)
-
-            if dataset.min_size != self.min_size:
-                raise Exception(f'Different min_size values are met {self.min_size} and {dataset.min_size}')

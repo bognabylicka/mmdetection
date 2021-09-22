@@ -1,5 +1,5 @@
-albumentations==0.4.6
 cityscapesscripts
+albumentations==0.4.6
 imagecorruptions
 ninja
 tensorboard

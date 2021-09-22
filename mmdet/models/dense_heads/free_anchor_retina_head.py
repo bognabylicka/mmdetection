@@ -1,3 +1,4 @@
+# Copyright (c) OpenMMLab. All rights reserved.
 import torch
 import torch.nn.functional as F
 
@@ -226,7 +227,7 @@ class FreeAnchorRetinaHead(RetinaHead):
         :math:`P_{ij}^{loc}`: matched_box_prob, box probability of matched samples.
 
         Args:
-            matched_cls_prob (Tensor): Classification probabilty of matched
+            matched_cls_prob (Tensor): Classification probability of matched
                 samples in shape (num_gt, pre_anchor_topk).
             matched_box_prob (Tensor): BBox probability of matched samples,
                 in shape (num_gt, pre_anchor_topk).

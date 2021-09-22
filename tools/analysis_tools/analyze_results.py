@@ -1,3 +1,4 @@
+# Copyright (c) OpenMMLab. All rights reserved.
 import argparse
 import os.path as osp
 
@@ -45,7 +46,7 @@ def bbox_map_eval(det_result, annotation):
     return sum(mean_aps) / len(mean_aps)
 
 
-class ResultVisualizer(object):
+class ResultVisualizer:
     """Display and save evaluation results.
 
     Args:

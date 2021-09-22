@@ -1,19 +1,17 @@
-import warnings
-import numpy as np
 import random
+import warnings
+
+import numpy as np
 import torch
 from copy import copy
 from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
-from mmcv.runner import (HOOKS, DistSamplerSeedHook, EpochBasedRunner, LoggerHook,
+from mmcv.runner import (HOOKS, DistSamplerSeedHook, EpochBasedRunner,  LoggerHook,
                          Fp16OptimizerHook, OptimizerHook, build_optimizer, load_checkpoint,
                          build_runner)
+from mmcv.utils import build_from_cfg
 
 from mmdet.core import (DistEvalHook, DistEvalPlusBeforeRunHook, EvalHook,
                         EvalPlusBeforeRunHook)
-from mmdet.integration.nncf import CompressionHook, CheckpointHookBeforeTraining, wrap_nncf_model
-from mmdet.parallel import MMDataCPU
-from mmcv.utils import build_from_cfg
-
 from mmdet.datasets import (build_dataloader, build_dataset,
                             replace_ImageToTensor)
 from mmdet.utils import get_root_logger
@@ -57,7 +55,7 @@ def train_detector(model,
                    validate=False,
                    timestamp=None,
                    meta=None):
-    logger = get_root_logger(cfg.log_level)
+    logger = get_root_logger(log_level=cfg.log_level)
 
     # prepare data loaders
     dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
@@ -86,41 +84,19 @@ def train_detector(model,
             seed=cfg.seed) for ds in dataset
     ]
 
-    map_location = 'cuda'
-    if not torch.cuda.is_available():
-        map_location = 'cpu'
-
-    if cfg.load_from:
-        load_checkpoint(model=model, filename=cfg.load_from, map_location=map_location)
-
     # put model on gpus
-    if torch.cuda.is_available():
-        model = model.cuda()
-
-    # nncf model wrapper
-    nncf_enable_compression = bool(cfg.get('nncf_config'))
-    if nncf_enable_compression:
-        compression_ctrl, model = wrap_nncf_model(model, cfg, data_loaders[0], get_fake_input)
+    if distributed:
+        find_unused_parameters = cfg.get('find_unused_parameters', False)
+        # Sets the `find_unused_parameters` parameter in
+        # torch.nn.parallel.DistributedDataParallel
+        model = MMDistributedDataParallel(
+            model.cuda(),
+            device_ids=[torch.cuda.current_device()],
+            broadcast_buffers=False,
+            find_unused_parameters=find_unused_parameters)
     else:
-        compression_ctrl = None
-
-    if torch.cuda.is_available():
-        if distributed:
-            # put model on gpus
-            find_unused_parameters = cfg.get('find_unused_parameters', False)
-            # Sets the `find_unused_parameters` parameter in
-            # torch.nn.parallel.DistributedDataParallel
-            model = MMDistributedDataParallel(
-                model,
-                device_ids=[torch.cuda.current_device()],
-                broadcast_buffers=False,
-                find_unused_parameters=find_unused_parameters)
-        else:
-            model = MMDataParallel(
-                model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
-    else:
-        model = MMDataCPU(model)
-
+        model = MMDataParallel(
+            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
 
     # build runner
     optimizer = build_optimizer(model, cfg.optimizer)
@@ -130,6 +106,9 @@ def train_detector(model,
             'type': 'EpochBasedRunner',
             'max_epochs': cfg.total_epochs
         }
+        warnings.warn(
+            'config is now expected to have a `runner` section, '
+            'please set `runner` in your config.', UserWarning)
     else:
         if 'total_epochs' in cfg:
             assert cfg.total_epochs == cfg.runner.max_epochs
@@ -142,6 +121,7 @@ def train_detector(model,
             work_dir=cfg.work_dir,
             logger=logger,
             meta=meta))
+
     # an ugly workaround to make .log and .log.json filenames the same
     runner.timestamp = timestamp
 
@@ -183,13 +163,8 @@ def train_detector(model,
         eval_cfg = cfg.get('evaluation', {})
         eval_cfg['by_epoch'] = cfg.runner['type'] != 'IterBasedRunner'
         eval_hook = DistEvalHook if distributed else EvalHook
-        if nncf_enable_compression:
-            eval_hook = DistEvalPlusBeforeRunHook if distributed else EvalPlusBeforeRunHook
         runner.register_hook(eval_hook(val_dataloader, **eval_cfg))
 
-    if nncf_enable_compression:
-        runner.register_hook(CompressionHook(compression_ctrl=compression_ctrl))
-        runner.register_hook(CheckpointHookBeforeTraining())
     # user-defined hooks
     if cfg.get('custom_hooks', None):
         custom_hooks = cfg.custom_hooks
@@ -205,6 +180,7 @@ def train_detector(model,
             runner.register_hook(hook, priority=priority)
 
     if cfg.resume_from:
-        runner.resume(cfg.resume_from, map_location=map_location)
-
-    runner.run(data_loaders, cfg.workflow, compression_ctrl=compression_ctrl)
+        runner.resume(cfg.resume_from)
+    elif cfg.load_from:
+        runner.load_checkpoint(cfg.load_from)
+    runner.run(data_loaders, cfg.workflow)

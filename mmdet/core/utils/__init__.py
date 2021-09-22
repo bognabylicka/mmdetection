@@ -1,8 +1,9 @@
-from .dist_utils import DistOptimizerHook, allreduce_grads, reduce_mean
+from .dist_utils import (DistOptimizerHook, all_reduce_dict, allreduce_grads,
+                         reduce_mean)
 from .lr_updater import CosineAnnealingUntilEpochLrUpdaterHook
-from .misc import mask2ndarray, multi_apply, unmap
+from .misc import flip_tensor, mask2ndarray, multi_apply, unmap
 
 __all__ = [
-    'allreduce_grads', 'CosineAnnealingUntilEpochLrUpdaterHook', 'DistOptimizerHook', 
-    'mask2ndarray', 'multi_apply', 'unmap', 'reduce_mean'
+    'allreduce_grads', 'CosineAnnealingUntilEpochLrUpdaterHook', 'DistOptimizerHook', 'reduce_mean',
+    'multi_apply', 'unmap', 'mask2ndarray', 'flip_tensor', 'all_reduce_dict'
 ]

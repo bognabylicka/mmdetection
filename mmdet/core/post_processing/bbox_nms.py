@@ -1,12 +1,7 @@
+# Copyright (c) OpenMMLab. All rights reserved.
 import torch
-from torch.onnx import is_in_onnx_export
+from mmcv.ops.nms import batched_nms
 
-from mmdet.integration.nncf import no_nncf_trace, is_in_nncf_tracing
-
-from mmdet.ops.nms import batched_nms
-
-from ...utils.deployment.symbolic import py_symbolic
-from ..utils.misc import dummy_pad, topk
 from mmdet.core.bbox.iou_calculators import bbox_overlaps
 
 
@@ -18,13 +13,14 @@ def multiclass_nms(multi_bboxes,
                    score_factors=None,
                    return_inds=False):
     """NMS for multi-class bboxes.
+
     Args:
         multi_bboxes (Tensor): shape (n, #class*4) or (n, 4)
         multi_scores (Tensor): shape (n, #class), where the last column
             contains scores of the background class, but this will be ignored.
         score_thr (float): bbox threshold, bboxes with scores lower than it
             will not be considered.
-        nms_cfg (dict): NMS operation config
+        nms_thr (float): NMS IoU threshold
         max_num (int, optional): if there are more than max_num bboxes after
             NMS, only top max_num will be kept. Default to -1.
         score_factors (Tensor, optional): The factors multiplied to scores
@@ -33,72 +29,70 @@ def multiclass_nms(multi_bboxes,
             bboxes. Default to False.
 
     Returns:
-        tuple: (bboxes, labels, indices (optional)), tensors of shape (k, 5),
-            (k), and (k). Labels are 0-based.
+        tuple: (dets, labels, indices (optional)), tensors of shape (k, 5),
+            (k), and (k). Dets are boxes with scores. Labels are 0-based.
     """
-
-    if score_factors is not None:
-        target_shape = list(score_factors.shape) + [1, ] * (multi_scores.dim() - score_factors.dim())
-        scores = multi_scores * score_factors.view(*target_shape).expand_as(multi_scores)
-    else:
-        scores = multi_scores
-
-    dets, keep = multiclass_nms_core(multi_bboxes, scores, score_thr, nms_cfg, max_num, return_inds)
-    
-    labels = dets[:, 5].long().view(-1)
-    dets = dets[:, :5]
-
-    if keep is not None:
-        return dets, labels, keep
-    else:
-        return dets, labels
-
-
-@py_symbolic()
-def multiclass_nms_core(multi_bboxes, multi_scores, score_thr, nms_cfg, max_num=-1, return_inds=False):
-    num_classes = multi_scores.size(1)
+    num_classes = multi_scores.size(1) - 1
+    # exclude background category
     if multi_bboxes.shape[1] > 4:
         bboxes = multi_bboxes.view(multi_scores.size(0), -1, 4)
     else:
-        bboxes = multi_bboxes[:, None].expand(multi_scores.size(0), num_classes, 4)
-    scores = multi_scores
-        
-    if is_in_onnx_export() or is_in_nncf_tracing():
-        with no_nncf_trace():
-            labels = torch.arange(num_classes, dtype=torch.long, device=scores.device) \
-                          .unsqueeze(0) \
-                          .expand_as(scores) \
-                          .reshape(-1)
-            bboxes = bboxes.reshape(-1, 4)
-            scores = scores.reshape(-1)
+        bboxes = multi_bboxes[:, None].expand(
+            multi_scores.size(0), num_classes, 4)
 
-        assert nms_cfg['type'] == 'nms', 'Only vanilla NMS is compatible with ONNX export'
-        nms_cfg['score_thr'] = score_thr
-        nms_cfg['max_num'] = max_num if max_num > 0 else sys.maxsize
+    scores = multi_scores[:, :-1]
+
+    labels = torch.arange(num_classes, dtype=torch.long, device=scores.device)
+    labels = labels.view(1, -1).expand_as(scores)
+
+    bboxes = bboxes.reshape(-1, 4)
+    scores = scores.reshape(-1)
+    labels = labels.reshape(-1)
+
+    if not torch.onnx.is_in_onnx_export():
+        # NonZero not supported  in TensorRT
+        # remove low scoring boxes
+        valid_mask = scores > score_thr
+    # multiply score_factor after threshold to preserve more bboxes, improve
+    # mAP by 1% for YOLOv3
+    if score_factors is not None:
+        # expand the shape to match original shape of score
+        score_factors = score_factors.view(-1, 1).expand(
+            multi_scores.size(0), num_classes)
+        score_factors = score_factors.reshape(-1)
+        scores = scores * score_factors
+
+    if not torch.onnx.is_in_onnx_export():
+        # NonZero not supported  in TensorRT
+        inds = valid_mask.nonzero(as_tuple=False).squeeze(1)
+        bboxes, scores, labels = bboxes[inds], scores[inds], labels[inds]
     else:
-        with no_nncf_trace():
-            valid_mask = scores > score_thr
-        bboxes = bboxes[valid_mask]
-        scores = scores[valid_mask]
-        labels = valid_mask.nonzero()[:, 1]
+        # TensorRT NMS plugin has invalid output filled with -1
+        # add dummy data to make detection output correct.
+        bboxes = torch.cat([bboxes, bboxes.new_zeros(1, 4)], dim=0)
+        scores = torch.cat([scores, scores.new_zeros(1)], dim=0)
+        labels = torch.cat([labels, labels.new_zeros(1)], dim=0)
 
     if bboxes.numel() == 0:
-        dets = multi_bboxes.new_zeros((0, 6))
-        return dets, None
+        if torch.onnx.is_in_onnx_export():
+            raise RuntimeError('[ONNX Error] Can not record NMS '
+                               'as it has not been executed this time')
+        dets = torch.cat([bboxes, scores[:, None]], -1)
+        if return_inds:
+            return dets, labels, inds
+        else:
+            return dets, labels
 
-    # TODO: add size check before feed into batched_nms
     dets, keep = batched_nms(bboxes, scores, labels, nms_cfg)
 
-    labels = labels[keep]
-    dets = torch.cat([dets, labels.to(dets.dtype).unsqueeze(-1)], dim=1)
-
-    if not (is_in_onnx_export() or is_in_nncf_tracing()) and max_num > 0:
+    if max_num > 0:
         dets = dets[:max_num]
+        keep = keep[:max_num]
 
     if return_inds:
-        return dets, keep
+        return dets, labels[keep], inds[keep]
     else:
-        return dets, None
+        return dets, labels[keep]
 
 
 def fast_nms(multi_bboxes,
@@ -130,8 +124,9 @@ def fast_nms(multi_bboxes,
             Default: -1.
 
     Returns:
-        tuple: (bboxes, labels, coefficients), tensors of shape (k, 5), (k, 1),
-            and (k, coeffs_dim). Labels are 0-based.
+        tuple: (dets, labels, coefficients), tensors of shape (k, 5), (k, 1),
+            and (k, coeffs_dim). Dets are boxes with scores.
+            Labels are 0-based.
     """
 
     scores = multi_scores[:, :-1].t()  # [#class, n]

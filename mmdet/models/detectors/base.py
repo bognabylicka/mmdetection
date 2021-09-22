@@ -1,31 +1,22 @@
-import cv2
-import mmcv
-import numpy as np
-import pycocotools.mask as maskUtils
-import torch
-import torch.distributed as dist
-import torch.nn as nn
-import warnings
+# Copyright (c) OpenMMLab. All rights reserved.
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
-from contextlib import contextmanager
-from functools import partial
-from mmcv.runner import auto_fp16
-from mmcv.utils import print_log
+
+import mmcv
+import numpy as np
+import torch
+import torch.distributed as dist
+from mmcv.runner import BaseModule, auto_fp16
 
 from mmdet.core.visualization import imshow_det_bboxes
-from mmdet.integration.nncf import no_nncf_trace
-from mmdet.utils import get_root_logger
 
 
-class BaseDetector(nn.Module, metaclass=ABCMeta):
+class BaseDetector(BaseModule, metaclass=ABCMeta):
     """Base class for detectors."""
 
-    def __init__(self):
-        super(BaseDetector, self).__init__()
+    def __init__(self, init_cfg=None):
+        super(BaseDetector, self).__init__(init_cfg)
         self.fp16_enabled = False
-        self.img_metas = None
-        self.forward_backup = None
 
     @property
     def with_neck(self):
@@ -100,17 +91,6 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
         """Test function with test time augmentation."""
         pass
 
-    def init_weights(self, pretrained=None):
-        """Initialize the weights in detector.
-
-        Args:
-            pretrained (str, optional): Path to pre-trained weights.
-                Defaults to None.
-        """
-        if pretrained is not None:
-            logger = get_root_logger()
-            print_log(f'load model from: {pretrained}', logger=logger)
-
     async def aforward_test(self, *, img, img_metas, **kwargs):
         for var, name in [(img, 'img'), (img_metas, 'img_metas')]:
             if not isinstance(var, list):
@@ -138,20 +118,7 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
             img_metas (List[List[dict]]): the outer list indicates test-time
                 augs (multiscale, flip, etc.) and the inner list indicates
                 images in a batch.
-
-        Note that if `kwargs` contains either `forward_export=True` or
-        `dummy_forward=True` parameters, one of special branches of code is
-        enabled for ONNX export
-        (see the methods `forward_export` and `forward_dummy`).
         """
-        if kwargs.get('forward_export'):
-            logger = get_root_logger()
-            logger.info('Calling forward_export inside forward_test')
-            return self.forward_export(imgs)
-
-        if kwargs.get('dummy_forward'):
-            return self.forward_dummy(imgs[0])
-
         for var, name in [(imgs, 'imgs'), (img_metas, 'img_metas')]:
             if not isinstance(var, list):
                 raise TypeError(f'{name} must be a list, but got {type(var)}')
@@ -177,8 +144,7 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
             # proposals.
             if 'proposals' in kwargs:
                 kwargs['proposals'] = kwargs['proposals'][0]
-            with no_nncf_trace():
-                return self.simple_test(imgs[0], img_metas[0], **kwargs)
+            return self.simple_test(imgs[0], img_metas[0], **kwargs)
         else:
             assert imgs[0].size(0) == 1, 'aug test does not support ' \
                                          'inference with batch size ' \
@@ -186,10 +152,6 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
             # TODO: support test augmentation for predefined proposals
             assert 'proposals' not in kwargs
             return self.aug_test(imgs, img_metas, **kwargs)
-
-    @abstractmethod
-    def forward_dummy(self, img, **kwargs):
-        pass
 
     @auto_fp16(apply_to=('img', ))
     def forward(self, img, img_metas, return_loss=True, **kwargs):
@@ -201,53 +163,15 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
         and List[dict]), and when ``resturn_loss=False``, img and img_meta
         should be double nested (i.e.  List[Tensor], List[List[dict]]), with
         the outer list indicating test time augmentations.
-
-        The parameter `img_metas` has the default value `None` for ONNX export only,
-        in this case `return_loss` should be `False`, and `kwargs` should contain
-        either `forward_dummy=True` or `dummy_forward=True` parameters to enable
-        a special branch of code for ONNX tracer
-        (see the method `forward_test`).
         """
+        if torch.onnx.is_in_onnx_export():
+            assert len(img_metas) == 1
+            return self.onnx_export(img[0], img_metas[0])
+
         if return_loss:
             return self.forward_train(img, img_metas, **kwargs)
         else:
             return self.forward_test(img, img_metas, **kwargs)
-
-    def forward_export(self, imgs):
-        from torch.onnx.operators import shape_as_tensor
-        assert self.img_metas, 'Error: forward_export should be called inside forward_export_context'
-
-        img_shape = shape_as_tensor(imgs[0])
-        imgs_per_gpu = int(imgs[0].size(0))
-        assert imgs_per_gpu == 1
-        assert len(self.img_metas[0]) == imgs_per_gpu, f'self.img_metas={self.img_metas}'
-        self.img_metas[0][0]['img_shape'] = img_shape[2:4]
-
-        return self.simple_test(imgs[0], self.img_metas[0], postprocess=False)
-
-    @contextmanager
-    def forward_export_context(self, img_metas):
-        assert self.img_metas is None and self.forward_backup is None, 'Error: one forward context inside another forward context'
-
-        self.img_metas = img_metas
-        self.forward_backup = self.forward
-        self.forward = partial(self.forward, return_loss=False, forward_export=True, img_metas=None)
-        yield
-        self.forward = self.forward_backup
-        self.forward_backup = None
-        self.img_metas = None
-
-    @contextmanager
-    def forward_dummy_context(self, img_metas):
-        assert self.img_metas is None and self.forward_backup is None, 'Error: one forward context inside another forward context'
-
-        self.img_metas = img_metas
-        self.forward_backup = self.forward
-        self.forward = partial(self.forward, return_loss=False, dummy_forward=True, img_metas=None)
-        yield
-        self.forward = self.forward_backup
-        self.forward_backup = None
-        self.img_metas = None
 
     def _parse_losses(self, losses):
         """Parse the raw outputs (losses) of the network.
@@ -284,7 +208,7 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
 
         return loss, log_vars
 
-    def train_step(self, data, optimizer, compression_ctrl=None):
+    def train_step(self, data, optimizer):
         """The iteration step during training.
 
         This method defines an iteration step during training, except for the
@@ -303,27 +227,23 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
             dict: It should contain at least 3 keys: ``loss``, ``log_vars``, \
                 ``num_samples``.
 
-                - ``loss`` is a tensor for back propagation, which can be a \
-                weighted sum of multiple losses.
+                - ``loss`` is a tensor for back propagation, which can be a
+                  weighted sum of multiple losses.
                 - ``log_vars`` contains all the variables to be sent to the
-                logger.
-                - ``num_samples`` indicates the batch size (when the model is \
-                DDP, it means the batch size on each GPU), which is used for \
-                averaging the logs.
+                  logger.
+                - ``num_samples`` indicates the batch size (when the model is
+                  DDP, it means the batch size on each GPU), which is used for
+                  averaging the logs.
         """
         losses = self(**data)
         loss, log_vars = self._parse_losses(losses)
-
-        if compression_ctrl is not None:
-            compression_loss = compression_ctrl.loss()
-            loss += compression_loss
 
         outputs = dict(
             loss=loss, log_vars=log_vars, num_samples=len(data['img_metas']))
 
         return outputs
 
-    def val_step(self, data, optimizer):
+    def val_step(self, data, optimizer=None):
         """The iteration step during validation.
 
         This method shares the same signature as :func:`train_step`, but used
@@ -381,10 +301,8 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
         """
         img = mmcv.imread(img)
         img = img.copy()
-        text_results = None
         if isinstance(result, tuple):
-            bbox_result, segm_result = result[:2]
-            text_results = result[2][0] if len(result) > 2 else None
+            bbox_result, segm_result = result
             if isinstance(segm_result, tuple):
                 segm_result = segm_result[0]  # ms rcnn
         else:
@@ -407,18 +325,12 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
         if out_file is not None:
             show = False
         # draw bounding boxes
-
-        if text_results is not None:
-            labels = np.arange(len(text_results))
-            class_names = text_results
-        else:
-            class_names = self.CLASSES
         img = imshow_det_bboxes(
             img,
             bboxes,
             labels,
             segms,
-            class_names=class_names,
+            class_names=self.CLASSES,
             score_thr=score_thr,
             bbox_color=bbox_color,
             text_color=text_color,
@@ -433,6 +345,6 @@ class BaseDetector(nn.Module, metaclass=ABCMeta):
         if not (show or out_file):
             return img
 
-    def export(self, img, img_metas, **kwargs):
-        with self.forward_export_context(img_metas):
-            torch.onnx.export(self, img, **kwargs)
+    def onnx_export(self, img, img_metas):
+        raise NotImplementedError(f'{self.__class__.__name__} does '
+                                  f'not support ONNX EXPORT')

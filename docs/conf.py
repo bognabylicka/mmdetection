@@ -29,6 +29,7 @@ def get_version():
         exec(compile(f.read(), version_file, 'exec'))
     return locals()['__version__']
 
+
 # The full version, including alpha/beta/rc tags
 release = get_version()
 

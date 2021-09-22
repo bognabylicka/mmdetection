@@ -1,9 +1,12 @@
+# Copyright (c) OpenMMLab. All rights reserved.
 import copy
 import warnings
 
 from mmcv.cnn import VGG
 from mmcv.runner.hooks import HOOKS, Hook
 
+from mmdet.datasets.builder import PIPELINES
+from mmdet.datasets.pipelines import LoadAnnotations, LoadImageFromFile
 from mmdet.models.dense_heads import GARPNHead, RPNHead
 from mmdet.models.roi_heads.mask_heads import FusedSemanticHead
 
@@ -98,7 +101,10 @@ def get_loading_pipeline(pipeline):
     """
     loading_pipeline_cfg = []
     for cfg in pipeline:
-        if cfg['type'].startswith('Load'):
+        obj_cls = PIPELINES.get(cfg['type'])
+        # TODO：use more elegant way to distinguish loading modules
+        if obj_cls is not None and obj_cls in (LoadImageFromFile,
+                                               LoadAnnotations):
             loading_pipeline_cfg.append(cfg)
     assert len(loading_pipeline_cfg) == 2, \
         'The data pipeline in your config file must include ' \
@@ -111,7 +117,7 @@ class NumClassCheckHook(Hook):
 
     def _check_head(self, runner):
         """Check whether the `num_classes` in head matches the length of
-        `CLASSSES` in `dataset`.
+        `CLASSES` in `dataset`.
 
         Args:
             runner (obj:`EpochBasedRunner`): Epoch based Runner.
@@ -125,6 +131,11 @@ class NumClassCheckHook(Hook):
                 f'check if it is consistent with the `num_classes` '
                 f'of head')
         else:
+            assert type(dataset.CLASSES) is not str, \
+                (f'`CLASSES` in {dataset.__class__.__name__}'
+                 f'should be a tuple of str.'
+                 f'Add comma if number of classes is 1 as '
+                 f'CLASSES = ({dataset.CLASSES},)')
             for name, module in model.named_modules():
                 if hasattr(module, 'num_classes') and not isinstance(
                         module, (RPNHead, VGG, FusedSemanticHead, GARPNHead)) and name != 'backbone':

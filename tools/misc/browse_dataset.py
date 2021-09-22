@@ -1,9 +1,11 @@
+# Copyright (c) OpenMMLab. All rights reserved.
 import argparse
 import os
+from collections import Sequence
 from pathlib import Path
 
 import mmcv
-from mmcv import Config
+from mmcv import Config, DictAction
 
 from mmdet.core.utils import mask2ndarray
 from mmdet.core.visualization import imshow_det_bboxes
@@ -30,23 +32,50 @@ def parse_args():
         type=float,
         default=2,
         help='the interval of show (s)')
+    parser.add_argument(
+        '--cfg-options',
+        nargs='+',
+        action=DictAction,
+        help='override some settings in the used config, the key-value pair '
+        'in xxx=yyy format will be merged into config file. If the value to '
+        'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
+        'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
+        'Note that the quotation marks are necessary and that no white space '
+        'is allowed.')
     args = parser.parse_args()
     return args
 
 
-def retrieve_data_cfg(config_path, skip_type):
+def retrieve_data_cfg(config_path, skip_type, cfg_options):
+
+    def skip_pipeline_steps(config):
+        config['pipeline'] = [
+            x for x in config.pipeline if x['type'] not in skip_type
+        ]
+
     cfg = Config.fromfile(config_path)
+    if cfg_options is not None:
+        cfg.merge_from_dict(cfg_options)
+    # import modules from string list.
+    if cfg.get('custom_imports', None):
+        from mmcv.utils import import_modules_from_strings
+        import_modules_from_strings(**cfg['custom_imports'])
     train_data_cfg = cfg.data.train
-    train_data_cfg['pipeline'] = [
-        x for x in train_data_cfg.pipeline if x['type'] not in skip_type
-    ]
+    while 'dataset' in train_data_cfg and train_data_cfg[
+            'type'] != 'MultiImageMixDataset':
+        train_data_cfg = train_data_cfg['dataset']
+
+    if isinstance(train_data_cfg, Sequence):
+        [skip_pipeline_steps(c) for c in train_data_cfg]
+    else:
+        skip_pipeline_steps(train_data_cfg)
 
     return cfg
 
 
 def main():
     args = parse_args()
-    cfg = retrieve_data_cfg(args.config, args.skip_type)
+    cfg = retrieve_data_cfg(args.config, args.skip_type, args.cfg_options)
 
     dataset = build_dataset(cfg.data.train)
 

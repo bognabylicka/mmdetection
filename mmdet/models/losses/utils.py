@@ -1,5 +1,7 @@
+# Copyright (c) OpenMMLab. All rights reserved.
 import functools
 
+import mmcv
 import torch.nn.functional as F
 
 
@@ -23,6 +25,7 @@ def reduce_loss(loss, reduction):
         return loss.sum()
 
 
+@mmcv.jit(derivate=True, coderize=True)
 def weight_reduce_loss(loss, weight=None, reduction='mean', avg_factor=None):
     """Apply element-wise weight and reduce loss.
 

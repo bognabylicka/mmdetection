@@ -1,5 +1,8 @@
+# Copyright (c) OpenMMLab. All rights reserved.
 import argparse
 import os
+import os.path as osp
+import time
 import warnings
 
 import mmcv
@@ -7,20 +10,13 @@ import torch
 from mmcv import Config, DictAction
 from mmcv.cnn import fuse_conv_bn
 from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
-
-from mmdet.apis import get_fake_input, multi_gpu_test, single_gpu_test
-from mmcv.runner import wrap_fp16_model
-from mmdet.integration.nncf import (check_nncf_is_enabled,
-                                    get_nncf_config_from_meta,
-                                    is_checkpoint_nncf, wrap_nncf_model)
 from mmcv.runner import (get_dist_info, init_dist, load_checkpoint,
                          wrap_fp16_model)
 
+from mmdet.apis import multi_gpu_test, single_gpu_test
 from mmdet.datasets import (build_dataloader, build_dataset,
                             replace_ImageToTensor)
 from mmdet.models import build_detector
-from mmdet.parallel import MMDataCPU
-from mmdet.utils import ExtendedDictAction
 
 
 def parse_args():
@@ -28,24 +24,27 @@ def parse_args():
         description='MMDet test (and eval) a model')
     parser.add_argument('config', help='test config file path')
     parser.add_argument('checkpoint', help='checkpoint file')
+    parser.add_argument(
+        '--work-dir',
+        help='the directory to save the file containing evaluation metrics')
     parser.add_argument('--out', help='output result file in pickle format')
     parser.add_argument(
         '--fuse-conv-bn',
         action='store_true',
         help='Whether to fuse conv and bn, this will slightly increase'
-             'the inference speed')
+        'the inference speed')
     parser.add_argument(
         '--format-only',
         action='store_true',
         help='Format the output results without perform evaluation. It is'
-             'useful when you want to format the result to a specific format and '
-             'submit it to the test server')
+        'useful when you want to format the result to a specific format and '
+        'submit it to the test server')
     parser.add_argument(
         '--eval',
         type=str,
         nargs='+',
         help='evaluation metrics, which depends on the dataset, e.g., "bbox",'
-             ' "segm", "proposal", "f1" for COCO, and "mAP", "recall" for PASCAL VOC')
+        ' "segm", "proposal" for COCO, and "mAP", "recall" for PASCAL VOC')
     parser.add_argument('--show', action='store_true', help='show results')
     parser.add_argument(
         '--show-dir', help='directory where painted images will be saved')
@@ -61,7 +60,7 @@ def parse_args():
     parser.add_argument(
         '--tmpdir',
         help='tmp directory used for collecting results from multiple '
-             'workers, available when gpu-collect is not specified')
+        'workers, available when gpu-collect is not specified')
     parser.add_argument(
         '--cfg-options',
         nargs='+',
@@ -91,9 +90,6 @@ def parse_args():
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
-    parser.add_argument(
-        '--update_config', nargs='+', action=ExtendedDictAction,
-        help='Update configuration file by parameters specified here.')
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -112,7 +108,7 @@ def main():
     args = parse_args()
 
     assert args.out or args.eval or args.format_only or args.show \
-           or args.show_dir, \
+        or args.show_dir, \
         ('Please specify at least one operation (save/eval/format/show the '
          'results / save the results) with the argument "--out", "--eval"'
          ', "--format-only", "--show" or "--show-dir"')
@@ -124,8 +120,6 @@ def main():
         raise ValueError('The output file must be a pkl file.')
 
     cfg = Config.fromfile(args.config)
-    if args.update_config is not None:
-        cfg.merge_from_dict(args.update_config)
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
     # import modules from string list.
@@ -135,6 +129,7 @@ def main():
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
+
     cfg.model.pretrained = None
     if cfg.model.get('neck'):
         if isinstance(cfg.model.neck, list):
@@ -171,6 +166,13 @@ def main():
         distributed = True
         init_dist(args.launcher, **cfg.dist_params)
 
+    rank, _ = get_dist_info()
+    # allows not to create
+    if args.work_dir is not None and rank == 0:
+        mmcv.mkdir_or_exist(osp.abspath(args.work_dir))
+        timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
+        json_file = osp.join(args.work_dir, f'eval_{timestamp}.json')
+
     # build the dataloader
     dataset = build_dataset(cfg.data.test)
     data_loader = build_dataloader(
@@ -181,68 +183,39 @@ def main():
         shuffle=False)
 
     # build the model and load checkpoint
-    model = build_detector(cfg.model, train_cfg=None, test_cfg=cfg.get('test_cfg'))
-
-    # nncf model wrapper
-    if is_checkpoint_nncf(args.checkpoint) and not cfg.get('nncf_config'):
-        # reading NNCF config from checkpoint
-        nncf_part = get_nncf_config_from_meta(args.checkpoint)
-        for k, v in nncf_part.items():
-            cfg[k] = v
-
-    if cfg.get('nncf_config'):
-        check_nncf_is_enabled()
-        if not is_checkpoint_nncf(args.checkpoint):
-            raise RuntimeError('Trying to make testing with NNCF compression a model snapshot that was NOT trained with NNCF')
-        cfg.load_from = args.checkpoint
-        cfg.resume_from = None
-        if torch.cuda.is_available():
-            model = model.cuda()
-        _, model = wrap_nncf_model(model, cfg, None, get_fake_input)
-        checkpoint = torch.load(args.checkpoint, map_location=None)
-    else:
-        fp16_cfg = cfg.get('fp16', None)
-        if fp16_cfg is not None:
-            wrap_fp16_model(model)
-        checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
-        if args.fuse_conv_bn:  # TODO: FIXME: should it be inside this 'else' branch???
-            from tools.fuse_conv_bn import fuse_module
-            model = fuse_module(model)
-
+    cfg.model.train_cfg = None
+    model = build_detector(cfg.model, test_cfg=cfg.get('test_cfg'))
+    fp16_cfg = cfg.get('fp16', None)
+    if fp16_cfg is not None:
+        wrap_fp16_model(model)
+    checkpoint = load_checkpoint(model, args.checkpoint, map_location='cpu')
+    if args.fuse_conv_bn:
+        model = fuse_conv_bn(model)
     # old versions did not save class info in checkpoints, this walkaround is
     # for backward compatibility
-    if 'CLASSES' in checkpoint['meta']:
+    if 'CLASSES' in checkpoint.get('meta', {}):
         model.CLASSES = checkpoint['meta']['CLASSES']
     else:
         model.CLASSES = dataset.CLASSES
 
-    if torch.cuda.is_available():
-        if not distributed:
-            model = MMDataParallel(model, device_ids=[0])
-            outputs = single_gpu_test(model, data_loader, args.show, args.show_dir,
-                                      args.show_score_thr)
-        else:
-            model = MMDistributedDataParallel(
-                model.cuda(),
-                device_ids=[torch.cuda.current_device()],
-                broadcast_buffers=False)
-            outputs = multi_gpu_test(model, data_loader, args.tmpdir,
-                                     args.gpu_collect)
-    else:
-        model = MMDataCPU(model)
+    if not distributed:
+        model = MMDataParallel(model, device_ids=[0])
         outputs = single_gpu_test(model, data_loader, args.show, args.show_dir,
                                   args.show_score_thr)
+    else:
+        model = MMDistributedDataParallel(
+            model.cuda(),
+            device_ids=[torch.cuda.current_device()],
+            broadcast_buffers=False)
+        outputs = multi_gpu_test(model, data_loader, args.tmpdir,
+                                 args.gpu_collect)
 
     rank, _ = get_dist_info()
     if rank == 0:
         if args.out:
             print(f'\nwriting results to {args.out}')
             mmcv.dump(outputs, args.out)
-        kwargs = cfg.get('evaluation', {})
-        kwargs.pop('interval', None)
-        kwargs.pop('gpu_collect', None)
-        kwargs.update({} if args.options is None else args.options)
-        kwargs['metric'] = args.eval
+        kwargs = {} if args.eval_options is None else args.eval_options
         if args.format_only:
             dataset.format_results(outputs, **kwargs)
         if args.eval:
@@ -253,7 +226,12 @@ def main():
                     'rule'
             ]:
                 eval_kwargs.pop(key, None)
-            print(dataset.evaluate(outputs, **eval_kwargs))
+            eval_kwargs.update(dict(metric=args.eval, **kwargs))
+            metric = dataset.evaluate(outputs, **eval_kwargs)
+            print(metric)
+            metric_dict = dict(config=args.config, metric=metric)
+            if args.work_dir is not None and rank == 0:
+                mmcv.dump(metric_dict, json_file)
 
 
 if __name__ == '__main__':

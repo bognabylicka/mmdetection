@@ -1,12 +1,11 @@
-import numpy as np
+# Copyright (c) OpenMMLab. All rights reserved.
+import warnings
+
 import torch
-import torch.nn as nn
 
 from mmdet.core import bbox2result
 from ..builder import DETECTORS, build_backbone, build_head, build_neck
 from .base import BaseDetector
-
-from mmdet.integration.nncf.utils import no_nncf_trace, is_in_nncf_tracing
 
 
 @DETECTORS.register_module()
@@ -23,8 +22,13 @@ class SingleStageDetector(BaseDetector):
                  bbox_head=None,
                  train_cfg=None,
                  test_cfg=None,
-                 pretrained=None):
-        super(SingleStageDetector, self).__init__()
+                 pretrained=None,
+                 init_cfg=None):
+        super(SingleStageDetector, self).__init__(init_cfg)
+        if pretrained:
+            warnings.warn('DeprecationWarning: pretrained is deprecated, '
+                          'please use "init_cfg" instead')
+            backbone.pretrained = pretrained
         self.backbone = build_backbone(backbone)
         if neck is not None:
             self.neck = build_neck(neck)
@@ -33,24 +37,6 @@ class SingleStageDetector(BaseDetector):
         self.bbox_head = build_head(bbox_head)
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
-        self.init_weights(pretrained=pretrained)
-
-    def init_weights(self, pretrained=None):
-        """Initialize the weights in detector.
-
-        Args:
-            pretrained (str, optional): Path to pre-trained weights.
-                Defaults to None.
-        """
-        super(SingleStageDetector, self).init_weights(pretrained)
-        self.backbone.init_weights(pretrained=pretrained)
-        if self.with_neck:
-            if isinstance(self.neck, nn.Sequential):
-                for m in self.neck:
-                    m.init_weights()
-            else:
-                self.neck.init_weights()
-        self.bbox_head.init_weights()
 
     def extract_feat(self, img):
         """Directly extract features from the backbone+neck."""
@@ -98,38 +84,27 @@ class SingleStageDetector(BaseDetector):
                                               gt_labels, gt_bboxes_ignore)
         return losses
 
-    def simple_test(self, img, img_metas, rescale=False, postprocess=True):
-        x = self.extract_feat(img)
-        outs = self.bbox_head(x)
-        with no_nncf_trace():
-            bbox_results = \
-                self.bbox_head.get_bboxes(*outs, img_metas, self.test_cfg, False)
-        if torch.onnx.is_in_onnx_export() or is_in_nncf_tracing():
-            return bbox_results[0]
+    def simple_test(self, img, img_metas, rescale=False):
+        """Test function without test-time augmentation.
 
-        if postprocess:
-            bbox_results = [
-                self.postprocess(det_bboxes, det_labels, None, img_metas, rescale=rescale)
-                for det_bboxes, det_labels in bbox_results
-            ]
-        return bbox_results
+        Args:
+            img (torch.Tensor): Images with shape (N, C, H, W).
+            img_metas (list[dict]): List of image information.
+            rescale (bool, optional): Whether to rescale the results.
+                Defaults to False.
 
-    def postprocess(self,
-                    det_bboxes,
-                    det_labels,
-                    det_masks,
-                    img_meta,
-                    rescale=False):
-        num_classes = self.bbox_head.num_classes
-
-        if rescale:
-            scale_factor = img_meta[0]['scale_factor']
-            if isinstance(det_bboxes, torch.Tensor):
-                det_bboxes[:, :4] /= det_bboxes.new_tensor(scale_factor)
-            else:
-                det_bboxes[:, :4] /= np.asarray(scale_factor)
-
-        bbox_results = bbox2result(det_bboxes, det_labels, num_classes)
+        Returns:
+            list[list[np.ndarray]]: BBox results of each image and classes.
+                The outer list corresponds to each image. The inner list
+                corresponds to each class.
+        """
+        feat = self.extract_feat(img)
+        results_list = self.bbox_head.simple_test(
+            feat, img_metas, rescale=rescale)
+        bbox_results = [
+            bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes)
+            for det_bboxes, det_labels in results_list
+        ]
         return bbox_results
 
     def aug_test(self, imgs, img_metas, rescale=False):
@@ -155,4 +130,37 @@ class SingleStageDetector(BaseDetector):
             ' does not support test-time augmentation'
 
         feats = self.extract_feats(imgs)
-        return [self.bbox_head.aug_test(feats, img_metas, rescale=rescale)]
+        results_list = self.bbox_head.aug_test(
+            feats, img_metas, rescale=rescale)
+        bbox_results = [
+            bbox2result(det_bboxes, det_labels, self.bbox_head.num_classes)
+            for det_bboxes, det_labels in results_list
+        ]
+        return bbox_results
+
+    def onnx_export(self, img, img_metas):
+        """Test function without test time augmentation.
+
+        Args:
+            img (torch.Tensor): input images.
+            img_metas (list[dict]): List of image information.
+
+        Returns:
+            tuple[Tensor, Tensor]: dets of shape [N, num_det, 5]
+                and class labels of shape [N, num_det].
+        """
+        x = self.extract_feat(img)
+        outs = self.bbox_head(x)
+        # get origin input shape to support onnx dynamic shape
+
+        # get shape as tensor
+        img_shape = torch._shape_as_tensor(img)[2:]
+        img_metas[0]['img_shape_for_onnx'] = img_shape
+        # get pad input shape to support onnx dynamic shape for exporting
+        # `CornerNet` and `CentripetalNet`, which 'pad_shape' is used
+        # for inference
+        img_metas[0]['pad_shape_for_onnx'] = img_shape
+        # TODO:move all onnx related code in bbox_head to onnx_export function
+        det_bboxes, det_labels = self.bbox_head.get_bboxes(*outs, img_metas)
+
+        return det_bboxes, det_labels
