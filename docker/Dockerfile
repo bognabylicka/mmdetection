@@ -17,8 +17,8 @@ RUN pip install mmcv-full==1.3.8 -f https://download.openmmlab.com/mmcv/dist/cu1
 
 # Install mmdetection
 RUN conda install cython -y && conda clean --all
-ARG MMDET_BRANCH=ote
-RUN git clone --recursive --branch $MMDET_BRANCH https://github.com/opencv/mmdetection.git /mmdetection
+ARG MMDET_BRANCH=ote_yolox
+RUN git clone --recursive --branch $MMDET_BRANCH https://github.com/bognabylicka/mmdetection.git /mmdetection
 WORKDIR /mmdetection
 ENV FORCE_CUDA="1"
 RUN pip install -r requirements/build.txt
