@@ -16,6 +16,32 @@ from .api_wrappers import COCO, COCOeval
 from .builder import DATASETS
 from .custom import CustomDataset
 
+try:
+    import pycocotools
+    if not hasattr(pycocotools, '__sphinx_mock__'):  # for doc generation
+        assert pycocotools.__version__ >= '12.0.2'
+except AssertionError:
+    raise AssertionError('Incompatible version of pycocotools is installed. '
+                         'Run pip uninstall pycocotools first. Then run pip '
+                         'install mmpycocotools to install open-mmlab forked '
+                         'pycocotools.')
+
+
+def get_polygon(segm, bbox, return_rect):
+    xmin, ymin, xmax, ymax, conf = bbox
+    if segm is not None:
+        mask = decode(segm)
+        contours = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[-2]
+        if contours:
+            contour = sorted(contours, key=lambda x: -cv2.contourArea(x))[0]
+            if return_rect:
+                return cv2.boxPoints(cv2.minAreaRect(contour)).reshape(-1), conf
+            else:
+                return contour.reshape(-1), conf
+    contour = [xmin, ymin, xmax, ymin, xmax, ymax, xmin, ymax]
+
+    return contour, conf
+
 
 @DATASETS.register_module()
 class CocoDataset(CustomDataset):
